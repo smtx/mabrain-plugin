@@ -91,8 +91,9 @@ unchanged pages are skipped at no cost.
 
 `get_job` with the `job_id`: `queued` or `running` → check again in a minute; `completed` → say how
 many facts were created; `partial` → say which part failed (`detail`); `failed` → show `detail`;
-`unknown` → the extraction's answer was lost and it may be running: wait, and do not upload the
-same source again until it clears.
+`unknown` → the engine has not confirmed the extraction yet: each `get_job` tries to reconcile it, which
+can take a few checks while the engine is unavailable (at most 30 min). Do not upload the same source
+until it is no longer `unknown`.
 
 Errors: `busy` (another of the user's sources is still being extracted) → wait for it and retry;
 `duplicate` → this content is already in the brain, nothing to do.
