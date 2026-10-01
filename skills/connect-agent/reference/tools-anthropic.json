@@ -6,6 +6,7 @@
       "type": "object",
       "properties": {
         "question": {
+          "minLength": 1,
           "type": "string",
           "description": "The question, in natural language.",
           "maxLength": 4000
@@ -47,6 +48,7 @@
       "type": "object",
       "properties": {
         "fact_id": {
+          "minLength": 1,
           "type": "string",
           "description": "The fact's id."
         }
@@ -64,6 +66,7 @@
       "type": "object",
       "properties": {
         "content": {
+          "minLength": 1,
           "type": "string",
           "description": "What the expert knows, in full sentences.",
           "maxLength": 10000
@@ -97,6 +100,7 @@
       "type": "object",
       "properties": {
         "fact_id": {
+          "minLength": 1,
           "type": "string",
           "description": "The fact's id."
         },
@@ -119,13 +123,14 @@
       "type": "object",
       "properties": {
         "fact_id": {
+          "minLength": 1,
           "type": "string",
           "description": "The fact's id."
         },
         "reason": {
+          "minLength": 1,
           "type": "string",
           "description": "Why it is wrong.",
-          "minLength": 1,
           "maxLength": 1000
         }
       },
@@ -143,10 +148,12 @@
       "type": "object",
       "properties": {
         "fact_id": {
+          "minLength": 1,
           "type": "string",
           "description": "The fact's id."
         },
         "curation_id": {
+          "minLength": 1,
           "type": "string",
           "description": "The curation_id returned by approve_fact or reject_fact."
         }
@@ -165,13 +172,14 @@
       "type": "object",
       "properties": {
         "fact_id": {
+          "minLength": 1,
           "type": "string",
           "description": "The fact's id."
         },
         "reason": {
+          "minLength": 1,
           "type": "string",
           "description": "Why it must be deleted (kept in the audit log).",
-          "minLength": 1,
           "maxLength": 1000
         }
       },
@@ -189,10 +197,12 @@
       "type": "object",
       "properties": {
         "gap_id": {
+          "minLength": 1,
           "type": "string",
           "description": "The gap's id."
         },
         "content": {
+          "minLength": 1,
           "type": "string",
           "description": "The answer, in full self-contained sentences.",
           "maxLength": 10000
@@ -221,13 +231,14 @@
       "type": "object",
       "properties": {
         "gap_id": {
+          "minLength": 1,
           "type": "string",
           "description": "The gap's id."
         },
         "reason": {
+          "minLength": 1,
           "type": "string",
           "description": "Why it is dismissed.",
-          "minLength": 1,
           "maxLength": 1000
         }
       },

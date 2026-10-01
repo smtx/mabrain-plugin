@@ -1,7 +1,7 @@
 {
   "name": "mabrain",
   "displayName": "Mabrain",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Manage your Mabrain brain from Claude: add sources (files, pages, whole sites), curate facts, answer gaps, run your regression questions and connect your agents.",
   "author": { "name": "SciPot" },
   "homepage": "https://mabrain.dev",

@@ -40,6 +40,17 @@ every verb: read (`ask_brain`, `list_gaps`, `get_fact`), ingest (`add_knowledge`
 (`review_queue`, `approve_fact`, `reject_fact`, `revoke_curation`, `delete_fact`, `answer_gap`,
 `dismiss_gap`). Give the model only the tools its key's role allows (`role` in `routes.json`).
 
+The live versions are served at `GET /v1/tools?format=anthropic|openai|routes&role=read|ingest|curate`
+(public, no key), and the whole contract for models at `GET /llms.txt` (times, credit, errors).
+
 `routes.json` maps each tool to its HTTP call: fill `{brain}` from your configuration and each name in
 `path_params` from the tool input; the remaining input goes in the JSON body (`other_params: body`)
 or the query string (`query`). Files are not a tool: upload them with `POST …/sources`.
+
+## Examples
+
+`examples/agent.py` (Python, `anthropic` + `httpx`) and `examples/agent.ts` (TypeScript,
+`@anthropic-ai/sdk`): a Claude agent that loads the tools for its key's role from `/v1/tools`, builds
+each call from the routes, sends an `Idempotency-Key` per tool use on writes, answers citing sources
+and says when the brain does not cover a question. For OpenAI, load `format=openai` and keep the same
+dispatcher.
