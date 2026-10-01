@@ -1,0 +1,94 @@
+{
+  "ask_brain": {
+    "method": "POST",
+    "path": "/v1/brains/{brain}/ask",
+    "role": "read",
+    "path_params": [],
+    "other_params": "body"
+  },
+  "list_gaps": {
+    "method": "GET",
+    "path": "/v1/brains/{brain}/gaps",
+    "role": "read",
+    "path_params": [],
+    "other_params": "query"
+  },
+  "get_fact": {
+    "method": "GET",
+    "path": "/v1/brains/{brain}/facts/{fact_id}",
+    "role": "read",
+    "path_params": [
+      "fact_id"
+    ],
+    "other_params": "none"
+  },
+  "add_knowledge": {
+    "method": "POST",
+    "path": "/v1/brains/{brain}/knowledge",
+    "role": "ingest",
+    "path_params": [],
+    "other_params": "body"
+  },
+  "review_queue": {
+    "method": "GET",
+    "path": "/v1/brains/{brain}/review",
+    "role": "curate",
+    "path_params": [],
+    "other_params": "none"
+  },
+  "approve_fact": {
+    "method": "POST",
+    "path": "/v1/brains/{brain}/facts/{fact_id}/approve",
+    "role": "curate",
+    "path_params": [
+      "fact_id"
+    ],
+    "other_params": "body"
+  },
+  "reject_fact": {
+    "method": "POST",
+    "path": "/v1/brains/{brain}/facts/{fact_id}/reject",
+    "role": "curate",
+    "path_params": [
+      "fact_id"
+    ],
+    "other_params": "body"
+  },
+  "revoke_curation": {
+    "method": "DELETE",
+    "path": "/v1/brains/{brain}/facts/{fact_id}/curations/{curation_id}",
+    "role": "curate",
+    "path_params": [
+      "fact_id",
+      "curation_id"
+    ],
+    "other_params": "none"
+  },
+  "delete_fact": {
+    "method": "DELETE",
+    "path": "/v1/brains/{brain}/facts/{fact_id}",
+    "role": "curate",
+    "path_params": [
+      "fact_id"
+    ],
+    "other_params": "query"
+  },
+  "answer_gap": {
+    "method": "POST",
+    "path": "/v1/brains/{brain}/gaps/{gap_id}/answer",
+    "role": "curate",
+    "path_params": [
+      "gap_id"
+    ],
+    "other_params": "body"
+  },
+  "dismiss_gap": {
+    "method": "POST",
+    "path": "/v1/brains/{brain}/gaps/{gap_id}/dismiss",
+    "role": "curate",
+    "path_params": [
+      "gap_id"
+    ],
+    "other_params": "body"
+  }
+}

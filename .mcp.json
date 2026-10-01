@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mabrain": {
+      "type": "http",
+      "url": "https://api.mabrain.dev/mcp"
+    }
+  }
+}

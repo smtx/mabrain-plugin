@@ -1,0 +1,12 @@
+{
+  "name": "mabrain",
+  "owner": { "name": "SciPot" },
+  "description": "The Mabrain plugin for Claude Code, Claude Desktop and Cowork.",
+  "plugins": [
+    {
+      "name": "mabrain",
+      "source": "./",
+      "description": "Manage your Mabrain brain: sources, curation, gaps, evaluation and agent integration."
+    }
+  ]
+}
