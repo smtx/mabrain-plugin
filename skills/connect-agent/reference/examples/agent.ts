@@ -1,4 +1,4 @@
-// A Claude agent that answers from a Mabrain brain, using only the published tool definitions.
+// A Claude agent that answers from a MaBrain brain, using only the published tool definitions.
 //
 //   npm install @anthropic-ai/sdk
 //   export ANTHROPIC_API_KEY=...  MABRAIN_API_KEY=mb_ro_...  MABRAIN_BRAIN=my-brain
@@ -29,7 +29,7 @@ async function load<T>(format: string): Promise<T> {
   return (await r.json()) as T;
 }
 
-// One Mabrain call for one tool use. Errors go back to the model as text, with their hint.
+// One MaBrain call for one tool use. Errors go back to the model as text, with their hint.
 async function callTool(route: Route, input: Record<string, unknown>, idempotencyKey: string): Promise<string> {
   const args = { ...input };
   let path = route.path.replace("{brain}", BRAIN);

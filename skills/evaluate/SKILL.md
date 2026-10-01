@@ -1,6 +1,6 @@
 ---
 name: evaluate
-description: Check which of the user's questions their Mabrain brain covers - a regression test of up to 25 questions, run after adding sources or curating. Use when the user wants to know if the brain can answer their questions, to test coverage, or to compare before and after a change.
+description: Check which of the user's questions their MaBrain brain covers - a regression test of up to 25 questions, run after adding sources or curating. Use when the user wants to know if the brain can answer their questions, to test coverage, or to compare before and after a change.
 argument-hint: "[questions file]"
 ---
 

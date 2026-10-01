@@ -1,15 +1,15 @@
 {
   "name": "mabrain",
   "owner": {
-    "name": "Mabrain",
+    "name": "MaBrain",
     "url": "https://mabra.in"
   },
-  "description": "The Mabrain plugin for Claude Code, Claude Desktop and Cowork.",
+  "description": "The MaBrain plugin for Claude Code, Claude Desktop and Cowork.",
   "plugins": [
     {
       "name": "mabrain",
       "source": "./",
-      "description": "Manage your Mabrain brain: sources, curation, gaps, evaluation and agent integration."
+      "description": "Manage your MaBrain brain: sources, curation, gaps, evaluation and agent integration."
     }
   ]
 }

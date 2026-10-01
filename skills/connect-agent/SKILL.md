@@ -1,6 +1,6 @@
 ---
 name: connect-agent
-description: Connect one of the user's own agents or apps to their Mabrain brain - generate the integration code for their stack (REST call, tool definitions for Claude or OpenAI function calling, or MCP) with the right key role. Use when the user wants their agent, bot, backend or workflow to ask, extend or curate the brain.
+description: Connect one of the user's own agents or apps to their MaBrain brain - generate the integration code for their stack (REST call, tool definitions for Claude or OpenAI function calling, or MCP) with the right key role. Use when the user wants their agent, bot, backend or workflow to ask, extend or curate the brain.
 argument-hint: "[path to the agent's code]"
 ---
 

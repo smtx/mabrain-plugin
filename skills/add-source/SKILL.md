@@ -1,12 +1,12 @@
 ---
 name: add-source
-description: Add material to the user's Mabrain brain - a local file, one web page, or a whole site or section (crawled on this machine, previewed before anything is uploaded). Use when the user wants the brain to learn from a document, a URL or a website, or to re-crawl a site for changes.
+description: Add material to the user's MaBrain brain - a local file, one web page, or a whole site or section (crawled on this machine, previewed before anything is uploaded). Use when the user wants the brain to learn from a document, a URL or a website, or to re-crawl a site for changes.
 argument-hint: "[file path | URL | site URL]"
 ---
 
 # Add a source to the brain
 
-The brain learns only from what is uploaded. Mabrain's server never downloads URLs: pages are
+The brain learns only from what is uploaded. MaBrain's server never downloads URLs: pages are
 fetched here, on the user's machine, and only their content is sent. Answer the user in their
 language.
 
@@ -17,7 +17,7 @@ Pick the path by what the user gave (`$ARGUMENTS`, or ask):
 | A local file (md, txt, html, pdf, docx; up to 50 MB) | A. Upload the file |
 | One web page | B. One page |
 | A site, a section (`/guides/`), a sitemap, or "re-crawl" | C. Crawl |
-| Pasted text, or a short note from the user | Use the Mabrain `add_source` tool with `content`, `title` and, if there is one, `source_url` |
+| Pasted text, or a short note from the user | Use the MaBrain `add_source` tool with `content`, `title` and, if there is one, `source_url` |
 
 If the user has more than one brain, call `list_brains` first and pass `brain` (the slug) everywhere.
 
@@ -31,7 +31,7 @@ Check it without printing it:
 ```
 
 - Never print, echo or write the full key, and never ask the user to paste it into the chat.
-- Missing: tell the user to ask their Mabrain operator for an ingest key, add
+- Missing: tell the user to ask their MaBrain operator for an ingest key, add
   `export MABRAIN_API_KEY=mb_in_…` to their shell profile (`~/.zshrc`) and restart Claude Code (an
   `export` in another terminal does not reach a session that is already open). Until then, a file
   under 100 KB can still go through `add_source` with `content` (read it and pass the text).

@@ -1,6 +1,6 @@
 ---
 name: gaps
-description: Review the questions the user's Mabrain brain could not answer (gaps) and close them - answer one with expert knowledge, add a source that covers it, or dismiss it. Use when the user asks what the brain does not know, what their agents could not answer, or wants to fill holes in the brain.
+description: Review the questions the user's MaBrain brain could not answer (gaps) and close them - answer one with expert knowledge, add a source that covers it, or dismiss it. Use when the user asks what the brain does not know, what their agents could not answer, or wants to fill holes in the brain.
 argument-hint: "[gap id]"
 ---
 

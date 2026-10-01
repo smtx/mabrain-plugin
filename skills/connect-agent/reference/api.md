@@ -1,4 +1,4 @@
-# Mabrain API for agents
+# MaBrain API for agents
 
 Base URL: `https://api.mabra.in`. Every call: `Authorization: Bearer <key>`. Keys by role:
 `mb_ro_` read (ask, list gaps), `mb_in_` ingest (read + add knowledge and sources), `mb_cu_` curate

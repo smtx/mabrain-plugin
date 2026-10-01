@@ -1,9 +1,9 @@
-# Mabrain for Claude
+# MaBrain for Claude
 
 Give your app a brain, from Claude Code. Add your docs, pages or a whole site; ask it and get answers
 that cite their source; fix what it gets wrong; plug it into your own agent with a few lines of code.
 
-> Mabrain is in early access: sign-in works for GitHub accounts that have an invite.
+> MaBrain is in early access: sign-in works for GitHub accounts that have an invite.
 
 ## Install (Claude Code)
 
@@ -20,7 +20,7 @@ Claude, for example: "add https://example.com/docs/ to my brain" or "what does m
 refunds?".
 
 **Claude Desktop and Cowork:** Customize → Plugins → Add → Add marketplace → `smtx/mabrain-plugin`,
-install **Mabrain**, and connect it in the plugin's **Connectors** tab.
+install **MaBrain**, and connect it in the plugin's **Connectors** tab.
 
 ## What you get
 

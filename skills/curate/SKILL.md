@@ -1,6 +1,6 @@
 ---
 name: curate
-description: Review and curate the facts in the user's Mabrain brain - walk the review queue (low-certainty facts and contradictions) and approve, reject, undo or delete facts, one confirmed change at a time. Use when the user wants to clean up, review, verify or correct what the brain knows.
+description: Review and curate the facts in the user's MaBrain brain - walk the review queue (low-certainty facts and contradictions) and approve, reject, undo or delete facts, one confirmed change at a time. Use when the user wants to clean up, review, verify or correct what the brain knows.
 argument-hint: "[fact id]"
 ---
 

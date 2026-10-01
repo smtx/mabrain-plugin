@@ -1,4 +1,4 @@
-"""A Claude agent that answers from a Mabrain brain, using only the published tool definitions.
+"""A Claude agent that answers from a MaBrain brain, using only the published tool definitions.
 
     pip install anthropic httpx
     export ANTHROPIC_API_KEY=...  MABRAIN_API_KEY=mb_ro_...  MABRAIN_BRAIN=my-brain
@@ -34,7 +34,7 @@ class Brain:
         self.routes = http.get("/v1/tools", params={"format": "routes", "role": role}).raise_for_status().json()
 
     def call(self, name: str, args: dict, idempotency_key: str) -> str:
-        """One Mabrain call for one tool use. Errors go back to the model as text, with their hint."""
+        """One MaBrain call for one tool use. Errors go back to the model as text, with their hint."""
         route, args = self.routes[name], dict(args)
         path = route["path"].replace("{brain}", self.brain)
         for param in route["path_params"]:

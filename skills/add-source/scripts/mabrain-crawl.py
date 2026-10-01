@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mabrain-crawl: bring web pages into a Mabrain brain from your own machine.
+"""mabrain-crawl: bring web pages into a MaBrain brain from your own machine.
 
 Installed once as ``~/.mabrain/mabrain-crawl.py`` (Python 3.10+, standard library only).
 The page content never goes through a model: the script downloads the literal HTML and
@@ -475,7 +475,7 @@ def _code(data: dict) -> str:
     return _error(data)[0]
 
 
-class MabrainTarget:
+class MaBrainTarget:
     """POST /v1/brains/{brain}/sources. The server decides a 409: ``duplicate`` (this brain
     already has the facts) or ``duplicate_other_brain`` (the operator re-extracts)."""
 
@@ -528,7 +528,7 @@ class MabrainTarget:
 
 def make_target(target: dict):  # noqa: ANN201
     if target["kind"] == "mabrain":
-        return MabrainTarget(target)
+        return MaBrainTarget(target)
     raise CrawlError(EXIT_USAGE, f"unknown target {target['kind']} (made by an older version of this script)")
 
 
