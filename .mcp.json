@@ -2,7 +2,7 @@
   "mcpServers": {
     "mabrain": {
       "type": "http",
-      "url": "https://api.mabrain.dev/mcp"
+      "url": "https://api.mabra.in/mcp"
     }
   }
 }

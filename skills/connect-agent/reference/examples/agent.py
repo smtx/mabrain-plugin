@@ -1,8 +1,8 @@
 """A Claude agent that answers from a Mabrain brain, using only the published tool definitions.
 
     pip install anthropic httpx
-    export ANTHROPIC_API_KEY=...  MABRAIN_API_KEY=mb_ro_...  MABRAIN_BRAIN=okr
-    python agent.py "How should we grade our key results?"
+    export ANTHROPIC_API_KEY=...  MABRAIN_API_KEY=mb_ro_...  MABRAIN_BRAIN=my-brain
+    python agent.py "What is our refund policy for annual plans?"
 
 The tools come from GET /v1/tools for the key's role, and each call is built from the same
 endpoint's routes, so the agent picks up new verbs without code changes.
@@ -61,7 +61,7 @@ def answer(question: str, brain: Brain, client: anthropic.Anthropic) -> str:
 
 
 if __name__ == "__main__":
-    http = httpx.Client(base_url=os.environ.get("MABRAIN_API_URL", "https://api.mabrain.dev"), timeout=60,
+    http = httpx.Client(base_url=os.environ.get("MABRAIN_API_URL", "https://api.mabra.in"), timeout=60,
                         headers={"Authorization": f"Bearer {os.environ['MABRAIN_API_KEY']}"})
     brain = Brain(http, os.environ["MABRAIN_BRAIN"], os.environ.get("MABRAIN_ROLE", "read"))
     print(answer(" ".join(sys.argv[1:]) or "What does the brain cover?", brain, anthropic.Anthropic()))

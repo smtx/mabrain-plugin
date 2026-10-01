@@ -1,17 +1,11 @@
-# Mabrain plugin
+# Mabrain for Claude
 
-Manage your Mabrain brain from Claude Code, Claude Desktop and Cowork.
+Give your app a brain, from Claude Code. Add your docs, pages or a whole site; ask it and get answers
+that cite their source; fix what it gets wrong; plug it into your own agent with a few lines of code.
 
-- **Connector**: the Mabrain MCP server (`https://api.mabrain.dev/mcp`), signed in with GitHub.
-- **Skills**: `/mabrain:add-source` (files, pages, whole sites), `/mabrain:curate` (review queue),
-  `/mabrain:gaps` (what the brain could not answer), `/mabrain:evaluate` (your regression
-  questions), `/mabrain:connect-agent` (integrate your own agents).
-- **Crawler**: `skills/add-source/scripts/mabrain-crawl.py` (Python 3.10+, standard library). It runs
-  on your machine; page content never goes through a model.
+> Mabrain is in early access: sign-in works for GitHub accounts that have an invite.
 
-## Install
-
-Claude Code:
+## Install (Claude Code)
 
 ```bash
 claude plugin marketplace add smtx/mabrain-plugin
@@ -21,34 +15,46 @@ claude plugin marketplace add smtx/mabrain-plugin
 claude plugin install mabrain@mabrain
 ```
 
-Then run `/mcp`, pick the plugin's `mabrain` server and sign in with GitHub. Your GitHub account must be
-registered by your Mabrain operator.
+Restart Claude Code, run `/mcp`, choose the `mabrain` server and sign in with GitHub. Then just ask
+Claude, for example: "add https://example.com/docs/ to my brain" or "what does my brain say about
+refunds?".
 
-Claude Desktop and Cowork: **Customize → Plugins → Add → Add marketplace**, enter
-`smtx/mabrain-plugin`, install **Mabrain**, then connect it in the plugin's **Connectors** tab and
-sign in with GitHub.
+**Claude Desktop and Cowork:** Customize → Plugins → Add → Add marketplace → `smtx/mabrain-plugin`,
+install **Mabrain**, and connect it in the plugin's **Connectors** tab.
 
-The repository is private: your GitHub account needs read access (your operator grants it).
+## What you get
 
-## Uploading files and crawling sites (Claude Code)
+| Skill | Use it to |
+|---|---|
+| `/mabrain:add-source` | Add a file, a page, or a whole site (crawled on your machine, previewed before anything is sent) |
+| `/mabrain:evaluate` | Check which of your questions the brain answers |
+| `/mabrain:gaps` | See what it could not answer, and fill it in |
+| `/mabrain:curate` | Review and fix facts, one confirmed change at a time |
+| `/mabrain:connect-agent` | Wire the brain into your own app or agent (Python, TypeScript, MCP) |
 
-Uploads from the shell use an ingest key from your operator. Add it to your shell profile and
-restart Claude Code:
+Every answer comes with its source and a certainty from 0 to 1. When the brain does not know, it says
+so instead of guessing, and remembers the question so you can fill the gap.
+
+## Uploading files and crawling sites
+
+Uploads from the terminal use an ingest key (`mb_in_…`). Put it in your shell profile and restart
+Claude Code:
 
 ```bash
 echo 'export MABRAIN_API_KEY=mb_in_...' >> ~/.zshrc
 ```
 
-Without it you can still add pasted text and single pages. If Claude Code runs sandboxed, allow the
-site's domain and `api.mabrain.dev`.
+Without it you can still add pasted text and single pages. The crawler (`python3`, no dependencies)
+sends the pages' literal HTML; nothing goes through a model on the way. If Claude Code runs
+sandboxed, allow the site's domain and `api.mabra.in`.
 
-## An agent or CI instead of a person
+## For your app
 
-Signing in is for people (their curations count as expert endorsements). An agent uses a key and
-its own MCP entry instead of this plugin's connector:
+Your app uses a read key (`mb_ro_…`) and the API at `https://api.mabra.in`. The full contract for
+models is at [api.mabra.in/llms.txt](https://api.mabra.in/llms.txt), and ready-to-paste tool
+definitions at [api.mabra.in/v1/tools](https://api.mabra.in/v1/tools). `/mabrain:connect-agent` writes
+the integration for you.
 
-```bash
-claude mcp add --transport http --scope user mabrain-agent https://api.mabrain.dev/mcp --header 'Authorization: Bearer ${MABRAIN_API_KEY}'
-```
+## License
 
-The single quotes keep the key out of Claude Code's configuration.
+MIT

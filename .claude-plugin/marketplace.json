@@ -1,6 +1,9 @@
 {
   "name": "mabrain",
-  "owner": { "name": "SciPot" },
+  "owner": {
+    "name": "Mabrain",
+    "url": "https://mabra.in"
+  },
   "description": "The Mabrain plugin for Claude Code, Claude Desktop and Cowork.",
   "plugins": [
     {

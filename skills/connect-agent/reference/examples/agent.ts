@@ -1,15 +1,15 @@
 // A Claude agent that answers from a Mabrain brain, using only the published tool definitions.
 //
 //   npm install @anthropic-ai/sdk
-//   export ANTHROPIC_API_KEY=...  MABRAIN_API_KEY=mb_ro_...  MABRAIN_BRAIN=okr
-//   npx tsx agent.ts "How should we grade our key results?"
+//   export ANTHROPIC_API_KEY=...  MABRAIN_API_KEY=mb_ro_...  MABRAIN_BRAIN=my-brain
+//   npx tsx agent.ts "What is our refund policy for annual plans?"
 //
 // The tools come from GET /v1/tools for the key's role, and each call is built from the same
 // endpoint's routes, so the agent picks up new verbs without code changes.
 
 import Anthropic from "@anthropic-ai/sdk";
 
-const API = process.env.MABRAIN_API_URL ?? "https://api.mabrain.dev";
+const API = process.env.MABRAIN_API_URL ?? "https://api.mabra.in";
 const BRAIN = process.env.MABRAIN_BRAIN!;
 const ROLE = process.env.MABRAIN_ROLE ?? "read"; // read | ingest | curate: what the key allows
 const MODEL = process.env.MABRAIN_AGENT_MODEL ?? "claude-opus-5-5";

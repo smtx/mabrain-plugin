@@ -81,7 +81,7 @@ first. It never sends a page through a model: it downloads the literal HTML and 
    continues where it stopped and never sends a page twice.
 4. Progress at any time: `python3 "${CLAUDE_SKILL_DIR}/scripts/mabrain-crawl.py" status --run <run_id>`.
 
-Sandboxed Claude Code: the site's domain and `api.mabrain.dev` must be in the sandbox's allowed
+Sandboxed Claude Code: the site's domain and `api.mabra.in` must be in the sandbox's allowed
 domains; if a request is blocked, tell the user which domain to allow.
 
 Pages that changed since the last crawl are uploaded as new documents and the old version stays;

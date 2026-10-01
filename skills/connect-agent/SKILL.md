@@ -19,7 +19,7 @@ Read `${CLAUDE_SKILL_DIR}/reference/api.md` first: it is the contract. Answer in
 
 | The agent… | Integration |
 |---|---|
-| Already supports MCP servers (Claude Agent SDK, many frameworks) | Point it at `https://api.mabrain.dev/mcp` with `Authorization: Bearer <key>` |
+| Already supports MCP servers (Claude Agent SDK, many frameworks) | Point it at `https://api.mabra.in/mcp` with `Authorization: Bearer <key>` |
 | Uses tool or function calling | Start from `reference/examples/agent.py` or `agent.ts`: it loads the definitions for the key's role from `GET /v1/tools` (same content as `reference/tools-anthropic.json` / `tools-openai.json`) and dispatches each call with `routes.json` |
 | Answers with retrieval it controls (RAG) | Call `POST /v1/brains/{brain}/ask` before the model call and put `context` in the prompt |
 

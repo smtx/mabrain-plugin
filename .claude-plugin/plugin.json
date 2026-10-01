@@ -2,8 +2,19 @@
   "name": "mabrain",
   "displayName": "Mabrain",
   "version": "0.2.0",
-  "description": "Manage your Mabrain brain from Claude: add sources (files, pages, whole sites), curate facts, answer gaps, run your regression questions and connect your agents.",
-  "author": { "name": "SciPot" },
-  "homepage": "https://mabrain.dev",
-  "keywords": ["mabrain", "knowledge", "memory", "mcp", "curation"]
+  "description": "Give your app a brain from Claude Code: add your docs, pages or a whole site, ask it with cited answers, fix what it gets wrong, and plug it into your own agent in minutes.",
+  "author": {
+    "name": "Mabrain",
+    "url": "https://mabra.in"
+  },
+  "homepage": "https://mabra.in",
+  "keywords": [
+    "mabrain",
+    "knowledge",
+    "memory",
+    "mcp",
+    "curation"
+  ],
+  "repository": "https://github.com/smtx/mabrain-plugin",
+  "license": "MIT"
 }

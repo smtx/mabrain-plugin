@@ -29,7 +29,7 @@ nothing. It may take a while for 25 questions (they run four at a time): say so 
 - A table: question, status (`covered`, `gap`, or `indeterminate`), and for covered ones the top
   fact with its certainty and source.
 - For each gap: what kind of source would cover it, and offer the `add-source` or `gaps` skill.
-- `indeterminate` means the brain could not decide (for example SciPot was slow): run that question
+- `indeterminate` means the brain could not decide (for example the service was slow): run that question
   again with `ask`.
 
 If a previous run exists in `.mabrain/evaluations/`, compare: which questions changed status. A

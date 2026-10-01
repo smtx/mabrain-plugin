@@ -17,11 +17,7 @@ the credit. Nothing is uploaded until ``upload`` is run on that same run, and ``
 sends exactly the files the preview downloaded. ``upload`` can be interrupted and run
 again: it continues where it stopped and never submits a page whose job may still run.
 
-Targets:
-  mabrain  POST {api}/v1/brains/{brain}/sources, key in MABRAIN_API_KEY (the default)
-  scipot   the operator's path before the Mabrain API exists: POST /documents/upload and
-           /pots/{pot}/extract-from-document with an env file (mode 0600) holding
-           SCIPOT_BASE_URL, SCIPOT_WORKSPACE_ID and SCIPOT_API_KEY
+Uploads go to POST {api}/v1/brains/{brain}/sources with the ingest key in MABRAIN_API_KEY.
 
 Exit codes: 0 done; 1 usage; 2 some pages failed; 3 stopped (credit exhausted, or a job
 still running: run ``upload`` again later).
@@ -36,7 +32,6 @@ import json
 import os
 import re
 import secrets
-import stat
 import sys
 import time
 import urllib.error
@@ -59,7 +54,7 @@ JOB_POLL_S = 5.0
 BUSY_WAIT_CAP_S = 600
 MAX_BUSY_IN_A_ROW = 30  # then stop and let the next upload continue
 CHARS_PER_TOKEN = 4  # rough, only for the preview's estimate
-DEFAULT_API = "https://api.mabrain.dev"
+DEFAULT_API = "https://api.mabra.in"
 
 EXIT_OK, EXIT_USAGE, EXIT_FAILED, EXIT_STOPPED = 0, 1, 2, 3
 
@@ -323,7 +318,7 @@ def page_title(html: bytes) -> str:
 
 
 def visible_text(html: bytes) -> str:
-    """The page's visible text with whitespace collapsed. SciPot deduplicates by the bytes of
+    """The page's visible text with whitespace collapsed. The server deduplicates by the bytes of
     the file, so a nonce or a build id in the HTML would re-extract (and bill) a page whose
     text did not change; the script compares this instead."""
     parser = _Text()
@@ -466,7 +461,7 @@ def _retry_after(headers) -> float:  # noqa: ANN001
 
 
 def _error(data: dict) -> tuple[str, str]:
-    """(code, hint) from Mabrain's {"error": {"code", "hint"}} or SciPot's {"detail": ...}."""
+    """(code, hint) from {"error": {"code", "hint"}}, or an older {"detail": {...}} envelope."""
     if not isinstance(data, dict):
         return "", ""
     for key in ("error", "detail"):
@@ -531,100 +526,10 @@ class MabrainTarget:
         return JobResult("running")
 
 
-def read_env_file(path: Path) -> tuple[str, str, str]:
-    if path.is_symlink() or not path.is_file():
-        raise CrawlError(EXIT_USAGE, f"{path} must be a regular file")
-    st = path.stat()
-    if st.st_uid != os.getuid() or stat.S_IMODE(st.st_mode) != 0o600:
-        raise CrawlError(EXIT_USAGE, f"{path} must be owned by you with mode 0600 (it holds the API key)")
-    values: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        m = re.fullmatch(r'(SCIPOT_[A-Z_]+)="?(.*?)"?', line.strip())
-        if m:
-            values[m.group(1)] = m.group(2)
-    base = values.get("SCIPOT_TEST_BASE_URL") or values.get("SCIPOT_BASE_URL", "")
-    ws = values.get("SCIPOT_TEST_WORKSPACE_ID") or values.get("SCIPOT_WORKSPACE_ID", "")
-    key = values.get("SCIPOT_TEST_API_KEY") or values.get("SCIPOT_API_KEY", "")
-    if not base or not ws or not key:
-        raise CrawlError(EXIT_USAGE, f"{path} needs SCIPOT_BASE_URL, SCIPOT_WORKSPACE_ID and SCIPOT_API_KEY")
-    return base, ws, key
-
-
-class ScipotTarget:
-    """The operator's path before the gate: upload + extract straight into a SciPot POT, with
-    the job rules of build_pot.py (never resubmit a running job; a partial job's facts are
-    all removed before its one retry, or the page is left for a human)."""
-
-    def __init__(self, target: dict, env_file: Path | None) -> None:
-        if env_file is None:
-            raise CrawlError(EXIT_USAGE, "--env-file is required for the scipot target")
-        _, ws, key = read_env_file(env_file)
-        if ws != target["workspace"]:
-            raise CrawlError(EXIT_USAGE, "the env file is for a different workspace than this run")
-        self.pot, self.profile = target["brain"], target.get("profile", "")
-        self.http = Http(target["endpoint"], {"X-API-Key": key, "X-Workspace-ID": ws})
-        self.completed_docs: set[str] = set()
-
-    def _extract(self, document_id: str) -> Submitted:
-        body_in = {"document_id": document_id}
-        if self.profile:
-            body_in["profile_id"] = self.profile
-        status, body, headers = self.http.call("POST", f"/pots/{self.pot}/extract-from-document", json_body=body_in)
-        if status == 202:
-            return Submitted("job", job_id=str(body.get("job_id", "")), document_id=document_id)
-        if status == 429:
-            return Submitted("stop" if "quota" in _code(body).lower() else "busy", retry_after=_retry_after(headers), reason=_code(body))
-        return Submitted("error", reason=f"extract -> {status} {_code(body)}")
-
-    def submit(self, entry: dict, data: bytes) -> Submitted:
-        status, body, headers = self.http.call(
-            "POST", "/documents/upload", params={"source_url": entry["url"], "description": entry.get("title", "")},
-            multipart=({}, (Path(entry["file"]).name, "text/html", data)),
-        )
-        if status == 201:
-            return self._extract(str(body.get("document_id", "")))
-        if status == 409 and _code(body) == "DOCUMENT_DUPLICATE":
-            doc = str(body["detail"]["document_id"])
-            if entry.get("document_id") == doc and entry.get("last_state") == COMPLETED:
-                return Submitted("unchanged", document_id=doc)
-            return self._extract(doc)  # stored but not (known to be) extracted into this POT
-        if status == 429:
-            return Submitted("busy", retry_after=_retry_after(headers), reason=_code(body))
-        return Submitted("error", reason=f"upload -> {status} {_code(body)}")
-
-    def job(self, entry: dict) -> JobResult:
-        status, job, _ = self.http.call("GET", f"/jobs/{entry['job_id']}")
-        if status != 200:
-            return JobResult("running" if status >= 500 else "failed", reason=f"GET /jobs -> {status}")
-        state = job.get("status")
-        result = job.get("result") or {}
-        if state == "completed" and not result.get("partial"):
-            return JobResult("completed")
-        if state == "completed" and result.get("partial"):
-            fact_ids = result.get("fact_ids") or []
-            removed = 0
-            for fid in fact_ids:
-                st, _, _ = self.http.call("DELETE", f"/pots/{self.pot}/facts/{fid}")
-                removed += st in (200, 204, 404)
-            if removed != len(fact_ids):
-                return JobResult("failed", reason=f"partial job: only {removed} of {len(fact_ids)} facts removed; clean up by hand")
-            if entry.get("retries", 0) >= 1:
-                return JobResult("failed", reason="partial twice: left for a human")
-            return JobResult("retry", reason="partial job cleaned up")
-        if state == "failed":
-            err = job.get("error") or {}
-            if err.get("retryable") and not result.get("facts_created") and entry.get("retries", 0) < 1:
-                return JobResult("retry", reason=f"failed retryable {err.get('code')}")
-            return JobResult("failed", reason=f"failed: {str(err)[:200]}")
-        return JobResult("running")
-
-
-def make_target(target: dict, env_file: Path | None):  # noqa: ANN201
+def make_target(target: dict):  # noqa: ANN201
     if target["kind"] == "mabrain":
         return MabrainTarget(target)
-    if target["kind"] == "scipot":
-        return ScipotTarget(target, env_file)
-    raise CrawlError(EXIT_USAGE, f"unknown target {target['kind']}")
+    raise CrawlError(EXIT_USAGE, f"unknown target {target['kind']} (made by an older version of this script)")
 
 
 # ---------------------------------------------------------------------------
@@ -635,14 +540,7 @@ def cmd_preview(args: argparse.Namespace) -> dict:
     url = args.url
     if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
         raise CrawlError(EXIT_USAGE, "the URL must start with http:// or https://")
-    if args.target == "mabrain":
-        target = {"kind": "mabrain", "endpoint": args.api.rstrip("/"), "brain": args.brain}
-    else:
-        base, ws, _ = read_env_file(Path(args.env_file)) if args.env_file else ("", "", "")
-        if not base:
-            raise CrawlError(EXIT_USAGE, "--env-file is required for the scipot target")
-        endpoint = (args.scipot_url or base).rstrip("/")
-        target = {"kind": "scipot", "endpoint": endpoint, "workspace": ws, "brain": args.brain, "profile": args.profile or ""}
+    target = {"kind": "mabrain", "endpoint": args.api.rstrip("/"), "brain": args.brain}
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(3)
     rdir = run_dir(run_id)
@@ -760,7 +658,7 @@ def _wait(target_impl, path: Path, manifest: dict, entry: dict, cap_s: float) ->
 def cmd_upload(args: argparse.Namespace) -> dict:
     path, manifest = load_run(args.run)
     rdir = path.parent
-    target_impl = make_target(manifest["target"], Path(args.env_file) if args.env_file else None)
+    target_impl = make_target(manifest["target"])
     if not manifest.get("approved_at"):
         manifest["approved_at"] = now()
         write_json(path, manifest)
@@ -813,18 +711,13 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("preview", help="find and download the pages; upload nothing")
     p.add_argument("--url", required=True)
-    p.add_argument("--brain", required=True, help="brain id (the POT id for --target scipot)")
+    p.add_argument("--brain", required=True, help="the brain's slug")
     p.add_argument("--prefix", default=None, help="only pages whose path starts with this (default: the URL's path)")
     p.add_argument("--max-pages", type=int, default=DEFAULT_MAX_PAGES)
     p.add_argument("--urls-file", default=None, help="exact pages to bring, one URL per line (same site as --url); skips discovery")
-    p.add_argument("--target", choices=["mabrain", "scipot"], default="mabrain")
     p.add_argument("--api", default=os.environ.get("MABRAIN_API_URL", DEFAULT_API))
-    p.add_argument("--env-file", default=None, help="scipot target: env file (0600)")
-    p.add_argument("--profile", default=None, help="scipot target: extraction profile id")
-    p.add_argument("--scipot-url", default=None, help="scipot target: API URL instead of the env file's (e.g. https://scipot-core.fly.dev)")
     u = sub.add_parser("upload", help="upload the pages of an approved preview (also resumes)")
     u.add_argument("--run", required=True)
-    u.add_argument("--env-file", default=None)
     u.add_argument("--job-cap-s", default=JOB_CAP_S)
     s = sub.add_parser("status", help="summary of a run")
     s.add_argument("--run", required=True)
