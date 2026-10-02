@@ -53,7 +53,22 @@ JOB_CAP_S = 1800  # a job still running after this is never resubmitted
 JOB_POLL_S = 5.0
 BUSY_WAIT_CAP_S = 600
 MAX_BUSY_IN_A_ROW = 30  # then stop and let the next upload continue
-CHARS_PER_TOKEN = 4  # rough, only for the preview's estimate
+# The preview's cost estimate uses the server's prices (GET /v1/pricing, public); these defaults only
+# apply when the server cannot be reached, and the preview then says so. The server has the final word.
+TOKENS_PER_CHAR = 2.2
+USD_PER_MILLION = 2.0
+
+
+def server_pricing(api: str) -> dict:
+    """MaBrain's current rate, or the defaults (``source: "default"``) when it cannot be read."""
+    try:
+        req = urllib.request.Request(api.rstrip("/") + "/v1/pricing", headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310 -- https API from --api
+            body = json.loads(resp.read())
+        return {"usd_per_million": float(body["usd_per_million"]), "tokens_per_char": float(body["tokens_per_char"]),
+                "source": "server"}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {"usd_per_million": USD_PER_MILLION, "tokens_per_char": TOKENS_PER_CHAR, "source": "default"}
 DEFAULT_API = "https://api.mabra.in"
 
 EXIT_OK, EXIT_USAGE, EXIT_FAILED, EXIT_STOPPED = 0, 1, 2, 3
@@ -620,8 +635,15 @@ def summary(manifest: dict, rdir: Path) -> dict:
         "counts": counts, "to_upload": [e["url"] for e in to_upload],
         "unchanged": [e["url"] for e in entries if e["state"] == UNCHANGED],
         "failed": [{"url": e["url"], "reason": e["reason"]} for e in entries if e["state"] in (FAILED, OPERATOR)],
-        "estimate": {"visible_chars": chars, "approx_tokens": chars // CHARS_PER_TOKEN},
+        "estimate": _estimate(chars, manifest["target"].get("endpoint", "")),
     }
+
+
+def _estimate(chars: int, api: str) -> dict:
+    price = server_pricing(api) if api else {"usd_per_million": USD_PER_MILLION, "tokens_per_char": TOKENS_PER_CHAR, "source": "default"}
+    tokens = int(chars * price["tokens_per_char"])
+    return {"visible_chars": chars, "approx_tokens": tokens,
+            "approx_cost_usd": round(tokens * price["usd_per_million"] / 1_000_000, 2), "rate_source": price["source"]}
 
 
 def _record(path: Path, manifest: dict, entry: dict, **changes) -> None:

@@ -68,8 +68,11 @@ first. It never sends a page through a model: it downloads the literal HTML and 
    Quote the URL with single quotes; if it contains a single quote, write it to a file and use
    `--urls-file`.
 2. Show the user the preview from the JSON it prints: `counts` (new, unchanged, failed), a sample of
-   `to_upload`, and `estimate` (size of the visible text). Keep `run_id`. Ask for a go-ahead and do
-   not upload without it.
+   `to_upload`, and `estimate.approx_cost_usd` (what the upload will roughly cost) next to the credit
+   left this month (`list_brains` shows it as `credit.remaining_usd`). If `estimate.rate_source` is
+   `default`, say the cost is approximate (the server's price could not be read). Keep `run_id`. Ask
+   for a go-ahead and do not upload without it. If the cost is above the credit left, suggest a
+   smaller part (`--prefix`, `--max-pages` or `--urls-file`).
 3. Upload exactly what was previewed, in the background (it can take long; one page at a time):
 
    ```bash
@@ -96,7 +99,9 @@ can take a few checks while the engine is unavailable (at most 30 min). Do not u
 until it is no longer `unknown`.
 
 Errors: `busy` (another of the user's sources is still being extracted) → wait for it and retry;
-`duplicate` → this content is already in the brain, nothing to do.
+`duplicate` → this content is already in the brain, nothing to do; `credit_exhausted` → the hint
+says what it would cost and what is left: suggest a smaller part or waiting for next month's credit.
+Asking the brain never spends credit.
 
 When it completes, offer the `evaluate` skill to check that the brain now covers the questions this
 source was meant to answer.

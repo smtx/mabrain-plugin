@@ -2,6 +2,7 @@
 //
 //   npm install @anthropic-ai/sdk
 //   export ANTHROPIC_API_KEY=...  MABRAIN_API_KEY=mb_ro_...  MABRAIN_BRAIN=my-brain
+//   optional: MABRAIN_ASK_MODE=query detects and records gaps, and spends credit (default: search, free)
 //   npx tsx agent.ts "What is our refund policy for annual plans?"
 //
 // The tools come from GET /v1/tools for the key's role, and each call is built from the same
@@ -13,6 +14,7 @@ const API = process.env.MABRAIN_API_URL ?? "https://api.mabra.in";
 const BRAIN = process.env.MABRAIN_BRAIN!;
 const ROLE = process.env.MABRAIN_ROLE ?? "read"; // read | ingest | curate: what the key allows
 const MODEL = process.env.MABRAIN_AGENT_MODEL ?? "claude-opus-5-5";
+const ASK_MODE = process.env.MABRAIN_ASK_MODE ?? "search"; // chosen by whoever runs the agent, not by the model
 const AUTH = { Authorization: `Bearer ${process.env.MABRAIN_API_KEY}` };
 
 const SYSTEM =
@@ -31,7 +33,8 @@ async function load<T>(format: string): Promise<T> {
 
 // One MaBrain call for one tool use. Errors go back to the model as text, with their hint.
 async function callTool(route: Route, input: Record<string, unknown>, idempotencyKey: string): Promise<string> {
-  const args = { ...input };
+  const args: Record<string, unknown> = { ...input };
+  if (route.path.endsWith("/ask")) args.mode = ASK_MODE;
   let path = route.path.replace("{brain}", BRAIN);
   for (const p of route.path_params) {
     path = path.replace(`{${p}}`, encodeURIComponent(String(args[p])));

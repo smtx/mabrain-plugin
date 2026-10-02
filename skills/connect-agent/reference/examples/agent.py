@@ -2,6 +2,7 @@
 
     pip install anthropic httpx
     export ANTHROPIC_API_KEY=...  MABRAIN_API_KEY=mb_ro_...  MABRAIN_BRAIN=my-brain
+    # optional: MABRAIN_ASK_MODE=query detects and records gaps, and spends credit (default: search, free)
     python agent.py "What is our refund policy for annual plans?"
 
 The tools come from GET /v1/tools for the key's role, and each call is built from the same
@@ -28,14 +29,16 @@ SYSTEM = (
 class Brain:
     """The brain's tools for one key: definitions for the model, and the HTTP call behind each."""
 
-    def __init__(self, http: httpx.Client, brain: str, role: str = "read") -> None:
-        self.http, self.brain = http, brain
+    def __init__(self, http: httpx.Client, brain: str, role: str = "read", ask_mode: str = "search") -> None:
+        self.http, self.brain, self.ask_mode = http, brain, ask_mode
         self.tools = http.get("/v1/tools", params={"format": "anthropic", "role": role}).raise_for_status().json()
         self.routes = http.get("/v1/tools", params={"format": "routes", "role": role}).raise_for_status().json()
 
     def call(self, name: str, args: dict, idempotency_key: str) -> str:
         """One MaBrain call for one tool use. Errors go back to the model as text, with their hint."""
         route, args = self.routes[name], dict(args)
+        if name == "ask_brain":
+            args["mode"] = self.ask_mode  # chosen by whoever runs the agent, not by the model
         path = route["path"].replace("{brain}", self.brain)
         for param in route["path_params"]:
             path = path.replace("{" + param + "}", str(args.pop(param)))
@@ -63,5 +66,6 @@ def answer(question: str, brain: Brain, client: anthropic.Anthropic) -> str:
 if __name__ == "__main__":
     http = httpx.Client(base_url=os.environ.get("MABRAIN_API_URL", "https://api.mabra.in"), timeout=60,
                         headers={"Authorization": f"Bearer {os.environ['MABRAIN_API_KEY']}"})
-    brain = Brain(http, os.environ["MABRAIN_BRAIN"], os.environ.get("MABRAIN_ROLE", "read"))
+    brain = Brain(http, os.environ["MABRAIN_BRAIN"], os.environ.get("MABRAIN_ROLE", "read"),
+                  os.environ.get("MABRAIN_ASK_MODE", "search"))
     print(answer(" ".join(sys.argv[1:]) or "What does the brain cover?", brain, anthropic.Anthropic()))
