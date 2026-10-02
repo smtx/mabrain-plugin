@@ -3,7 +3,7 @@
 Give your app a brain, from Claude Code. Add your docs, pages or a whole site; ask it and get answers
 that cite their source; fix what it gets wrong; plug it into your own agent with a few lines of code.
 
-> Every GitHub account older than 30 days gets a brain and 5 $ of free credit a month. Asking is free.
+> Every GitHub account gets a brain and 5 $ of free credit a month. Asking is free.
 
 ## Install (Claude Code)
 
