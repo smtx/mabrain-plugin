@@ -60,7 +60,10 @@ command with every value already quoted, if you prefer to take it from there (re
 ## C. Crawl a site or a section
 
 The crawler ships with this plugin (Python 3.10+, standard library only). Check `python3 --version`
-first. It never sends a page through a model: it downloads the literal HTML and uploads it.
+first. It never sends a page through a model. It keeps each page's content and leaves out what
+repeats on every page (menu, header, footer, sidebars, forms), so the credit goes to knowledge;
+`--full-page` uploads whole pages instead. Privacy, terms, cookie and account pages are skipped
+(`--include-legal` keeps them).
 
 1. Preview (downloads, uploads nothing):
 
@@ -71,8 +74,9 @@ first. It never sends a page through a model: it downloads the literal HTML and 
    Exact pages instead of discovery: `--urls-file pages.txt` (one URL per line, same site).
    Quote the URL with single quotes; if it contains a single quote, write it to a file and use
    `--urls-file`.
-2. Show the user the preview from the JSON it prints: `counts` (new, unchanged, failed), a sample of
-   `to_upload`, and `estimate.approx_cost_usd` (what the upload will roughly cost) next to the credit
+2. Show the user the preview from the JSON it prints, in plain words: how many pages (`counts`:
+   new, unchanged, failed), a few of the pages in `to_upload` (URLs: show them as page names, not raw links), how many legal pages were left out
+   (`skipped`), and `estimate.approx_cost_usd` (what the upload will roughly cost) next to the credit
    left this month (`list_brains` shows it as `credit.remaining_usd`). If `estimate.rate_source` is
    `default`, say the cost is approximate (the server's price could not be read). Keep `run_id`. Ask
    for a go-ahead and do not upload without it. If the cost is above the credit left, suggest a
@@ -83,10 +87,14 @@ first. It never sends a page through a model: it downloads the literal HTML and 
    python3 "${CLAUDE_SKILL_DIR}/scripts/mabrain-crawl.py" upload --run <run_id>
    ```
 
-   Run it with `run_in_background`. Exit codes: 0 done; 2 some pages failed (listed with the reason);
+   Run it with `run_in_background`. Tell the user how long it should take (about half a minute per
+   page) and that they can ask "how is it going?" at any time. Exit codes: 0 done; 2 some pages failed (listed with the reason);
    3 stopped (credit exhausted, or a job still running): run the same `upload --run` again later, it
    continues where it stopped and never sends a page twice.
 4. Progress at any time: `python3 "${CLAUDE_SKILL_DIR}/scripts/mabrain-crawl.py" status --run <run_id>`.
+   Answer from its `progress`: pages done of the total, what they have cost so far
+   (`approx_spent_usd`) and the minutes left (`eta_minutes`). The background output also has one
+   line per page, `[done/total] state url (~cost so far, about N min left)`.
 
 Sandboxed Claude Code: the site's domain and `api.mabra.in` must be in the sandbox's allowed
 domains; if a request is blocked, tell the user which domain to allow.

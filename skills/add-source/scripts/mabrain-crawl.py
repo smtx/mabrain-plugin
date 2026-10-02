@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import http.client
 import json
 import os
@@ -49,7 +50,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 USER_AGENT = f"mabrain-crawl/{VERSION}"
 HTTP_TIMEOUT_S = 60
 MAX_PAGE_BYTES = 10 * 1024 * 1024
@@ -79,8 +80,8 @@ DEFAULT_API = "https://api.mabra.in"
 EXIT_OK, EXIT_USAGE, EXIT_FAILED, EXIT_STOPPED = 0, 1, 2, 3
 
 # Entry states. A page is "completed" only when its extraction job completed.
-PENDING, UPLOADING, UPLOADED, COMPLETED, UNCHANGED, FAILED, OPERATOR = (
-    "pending", "uploading", "uploaded", "completed", "unchanged", "failed", "operator",
+PENDING, UPLOADING, UPLOADED, COMPLETED, UNCHANGED, FAILED, OPERATOR, SKIPPED = (
+    "pending", "uploading", "uploaded", "completed", "unchanged", "failed", "operator", "skipped",
 )
 OPEN_STATES = (PENDING, UPLOADING, UPLOADED)
 
@@ -230,15 +231,42 @@ class _Links(HTMLParser):
                 self.hrefs.append(href)
 
 
-def discover(start_url: str, prefix: str | None, max_pages: int) -> tuple[list[str], str]:
-    """Pages to bring in, in a stable order, and how they were found ("sitemap" or "links")."""
+# Legal and account pages: never knowledge worth paying for. Skipped when a site is discovered
+# (--include-legal keeps them); a page listed by hand in --urls-file is always kept.
+_LEGAL_SEGMENTS = {
+    # English
+    "privacy", "privacy-policy", "privacy-notice", "privacy-statement", "terms", "tos", "terms-of-service",
+    "terms-of-use", "terms-and-conditions", "conditions", "legal", "legal-notice", "imprint", "impressum",
+    "cookies", "cookie-policy", "cookie-notice", "gdpr", "disclaimer", "accessibility", "accessibility-statement",
+    # Spanish and Catalan
+    "privacidad", "politica-de-privacidad", "politica-privacidad", "politica-de-cookies", "aviso-legal",
+    "terminos", "terminos-y-condiciones", "condiciones", "condiciones-de-uso", "rgpd", "accesibilidad",
+    "privacitat", "politica-de-privacitat", "avis-legal", "termes-i-condicions", "condicions",
+    # Accounts and shopping
+    "login", "signin", "sign-in", "logout", "signup", "sign-up", "register", "account", "my-account",
+    "cart", "checkout", "unsubscribe", "password-reset",
+}
+
+
+def is_legal(url: str) -> bool:
+    """A page whose path has a legal or account segment (``/privacy``, ``/es/aviso-legal``,
+    ``/legal/notice``), never a word inside a longer one (``/cookie-recipes``)."""
+    for segment in urllib.parse.urlsplit(url).path.lower().split("/"):
+        if segment.rsplit(".", 1)[0] in _LEGAL_SEGMENTS:
+            return True
+    return False
+
+
+def discover(start_url: str, prefix: str | None, max_pages: int, skip=lambda url: False) -> tuple[list[str], str]:  # noqa: ANN001
+    """Pages to bring in, in a stable order, and how they were found ("sitemap" or "links").
+    Pages for which ``skip`` is true are left out and do not count towards ``max_pages``."""
     parts = urllib.parse.urlsplit(start_url)
     site = _origin(start_url)
     origin = f"{parts.scheme}://{parts.netloc}"
     prefix = prefix if prefix is not None else (parts.path or "/")
     found: list[str] = []
     method = "sitemap"
-    for loc in sitemap_urls(origin, accept=lambda u: _same_site(_normalize(u), site, prefix), limit=max_pages):
+    for loc in sitemap_urls(origin, accept=lambda u: _same_site(_normalize(u), site, prefix) and not skip(_normalize(u)), limit=max_pages):
         url = _normalize(loc)
         if url not in found:
             found.append(url)
@@ -250,7 +278,8 @@ def discover(start_url: str, prefix: str | None, max_pages: int) -> tuple[list[s
             if url in seen:
                 continue
             seen.add(url)
-            found.append(url)
+            if not skip(url):  # a skipped page is still read for its links, never uploaded
+                found.append(url)
             try:
                 page = fetch(url)
             except (urllib.error.URLError, TimeoutError, OffsiteRedirect, ConnectionError):
@@ -344,6 +373,95 @@ def visible_text(html: bytes) -> str:
     parser = _Text()
     parser.feed(html.decode("utf-8", errors="replace"))
     return " ".join(" ".join(parser.parts).split())
+
+
+# ---------------------------------------------------------------------------
+# Main content: what is worth paying for. Menus, headers, footers, sidebars and forms repeat on
+# every page of a site; extracting them again for each page spends credit on the same few facts.
+
+
+# Never content, wherever they appear.
+_ALWAYS_DROP = {"head", "script", "style", "noscript", "template", "svg", "iframe", "nav", "aside", "form",
+                "button", "select", "dialog", "canvas", "object"}
+# The site's chrome when outside the content; an article's own header (with its title) stays.
+_CHROME = {"header", "footer"}
+_DROP_ROLES = {"navigation", "banner", "contentinfo", "complementary", "search", "dialog", "menu", "menubar"}
+_VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+_KEEP_ATTRS = {"href", "alt", "title", "lang", "colspan", "rowspan"}
+MIN_CONTENT_CHARS = 200  # less than this left after cleaning: the cleaner guessed wrong, keep more
+
+
+class _Clean(HTMLParser):
+    def __init__(self, only_main: bool) -> None:
+        super().__init__(convert_charrefs=True)
+        self.only_main = only_main
+        self.stack: list[tuple[str, bool, bool, bool]] = []  # tag, dropped here, main here, emitted
+        self.drop = self.main = 0
+        self.out: list[str] = []
+        self.kept_h1 = False
+
+    def _emitting(self) -> bool:
+        return not self.drop and (self.main > 0 or not self.only_main)
+
+    def _start(self, tag: str, attrs: dict) -> str:
+        kept = "".join(f' {k}="{html.escape(v or "", quote=True)}"' for k, v in attrs.items() if k in _KEEP_ATTRS)
+        return f"<{tag}{kept}>"
+
+    def handle_starttag(self, tag, attrs):  # noqa: ANN001
+        a = dict(attrs)
+        if tag in _VOID:
+            if self._emitting() and tag in ("br", "hr", "img"):
+                self.out.append(self._start(tag, a))
+            return
+        in_content = any(t in ("main", "article") or m for t, _, m, _ in self.stack)
+        dropped = tag in _ALWAYS_DROP or a.get("role") in _DROP_ROLES or (tag in _CHROME and not in_content)
+        main_here = tag == "main" or a.get("role") == "main"
+        self.drop += dropped
+        self.main += main_here
+        emitted = self._emitting() and tag not in ("html", "body")  # the output has its own wrapper
+        if emitted:
+            self.out.append(self._start(tag, a))
+            self.kept_h1 = self.kept_h1 or tag == "h1"
+        self.stack.append((tag, dropped, main_here, emitted))
+
+    def handle_endtag(self, tag):  # noqa: ANN001
+        if not any(t == tag for t, _, _, _ in self.stack):
+            return  # a stray end tag
+        while self.stack:
+            t, dropped, main_here, emitted = self.stack.pop()
+            if emitted:
+                self.out.append(f"</{t}>")
+            self.drop -= dropped
+            self.main -= main_here
+            if t == tag:
+                break
+
+    def handle_data(self, data):  # noqa: ANN001
+        if self._emitting():
+            self.out.append(html.escape(data, quote=False))
+
+
+def main_content(body: bytes) -> bytes:
+    """The page reduced to its content, as HTML: the <main> element when there is one, otherwise
+    the page without its navigation, header, footer, sidebars and forms. Falls back to keeping more
+    when too little text would be left, so a page is never emptied by a wrong guess."""
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        return body  # another encoding: sent as it is rather than re-encoded wrongly
+    has_main = re.search(r"<main[\s>]|role\s*=\s*[\"']?main\b", text, re.I) is not None
+    title = html.escape(page_title(body), quote=False)
+    for only_main in ((True, False) if has_main else (False,)):
+        parser = _Clean(only_main)
+        parser.feed(text)
+        parser.close()
+        kept = "".join(parser.out)
+        # The page's title is often in a header outside <main>: keep it as the content's heading.
+        heading = f"<h1>{title}</h1>" if title and not parser.kept_h1 else ""
+        out = f"<!doctype html><html><head><title>{title}</title></head><body>{heading}{kept}</body></html>".encode()
+        if len(visible_text(out)) >= MIN_CONTENT_CHARS:
+            return out
+    return body
 
 
 def sha256(data: bytes | str) -> str:
@@ -747,8 +865,18 @@ def cmd_preview(args: argparse.Namespace) -> dict:
         if offsite:
             raise CrawlError(EXIT_USAGE, f"--urls-file has pages on another site than --url: {offsite[:3]}")
         urls, method = list(dict.fromkeys(listed))[: args.max_pages], "list"
+        skipped_legal = []
     else:
-        urls, method = discover(url, args.prefix, args.max_pages)
+        skipped_legal: list[str] = []
+
+        def skip(u: str) -> bool:
+            if args.include_legal or not is_legal(u):
+                return False
+            if u not in skipped_legal:
+                skipped_legal.append(u)
+            return True
+
+        urls, method = discover(url, args.prefix, args.max_pages, skip=skip)
     say(f"found {len(urls)} page(s) by {method}")
 
     entries = []
@@ -769,6 +897,9 @@ def cmd_preview(args: argparse.Namespace) -> dict:
             entry.update(state=FAILED, reason=f"download failed: {getattr(e, 'reason', e)}")
             entries.append(entry)
             continue
+        if not args.urls_file and not args.include_legal and is_legal(page.final_url):
+            skipped_legal.append(u)  # a normal-looking address that redirects to a legal page
+            continue
         if page.status != 200:
             entry.update(state=FAILED, reason=f"HTTP {page.status}")
         elif "html" not in page.content_type.lower():
@@ -778,13 +909,16 @@ def cmd_preview(args: argparse.Namespace) -> dict:
         elif len(page.body) > MAX_PAGE_BYTES:
             entry.update(state=FAILED, reason="page larger than 10 MB")
         else:
-            text = visible_text(page.body)
+            body = page.body if args.full_page else main_content(page.body)
+            text = visible_text(body)
             name = slug_for(u)
-            (rdir / "pages" / name).write_bytes(page.body)
-            entry.update(file=f"pages/{name}", bytes=len(page.body), chars=len(text), title=page_title(page.body),
-                         html_sha256=sha256(page.body), text_sha256=sha256(text), final_url=page.final_url)
+            (rdir / "pages" / name).write_bytes(body)
+            entry.update(file=f"pages/{name}", bytes=len(body), chars=len(text), title=page_title(page.body),
+                         html_sha256=sha256(body), text_sha256=sha256(text), final_url=page.final_url)
             before = history.get(u)
-            if before and before.get("text_sha256") == entry["text_sha256"] and before.get("state") in (COMPLETED, UNCHANGED):
+            # Uploads made before the content was cleaned remembered the whole page's text.
+            same = before and before.get("text_sha256") in (entry["text_sha256"], sha256(visible_text(page.body)))
+            if same and before.get("state") in (COMPLETED, UNCHANGED):
                 entry.update(state=UNCHANGED, reason="same visible text as the last upload", document_id=before.get("document_id", ""))
             if before:
                 entry["last_state"] = before.get("state", "")
@@ -795,6 +929,8 @@ def cmd_preview(args: argparse.Namespace) -> dict:
         "version": VERSION, "run_id": run_id, "created_at": now(), "start_url": url,
         "prefix": args.prefix if args.prefix is not None else (urllib.parse.urlsplit(url).path or "/"),
         "discovered_by": method, "target": target, "approved_at": "", "entries": entries,
+        "skipped": [{"url": u, "reason": "legal or account page (use --include-legal to keep it)"} for u in skipped_legal],
+        "pricing": server_pricing(target["endpoint"]),
     }
     write_json(rdir / "manifest.json", manifest)
     return summary(manifest, rdir)
@@ -812,8 +948,35 @@ def summary(manifest: dict, rdir: Path) -> dict:
         "counts": counts, "to_upload": [e["url"] for e in to_upload],
         "unchanged": [e["url"] for e in entries if e["state"] == UNCHANGED],
         "failed": [{"url": e["url"], "reason": e["reason"]} for e in entries if e["state"] in (FAILED, OPERATOR)],
+        "skipped": manifest.get("skipped", []),
         "estimate": _estimate(chars, manifest["target"].get("endpoint", "")),
+        "progress": progress(manifest),
     }
+
+
+def progress(manifest: dict) -> dict:
+    """How far an upload is: pages done of the approved ones, what they cost, and how long the rest
+    should take at the pace so far (one page at a time: each waits for its extraction)."""
+    # The total is fixed when the upload is approved: a page that ends failed or unchanged is done,
+    # not removed from the count.
+    done = [e for e in manifest["entries"] if e["state"] == COMPLETED]
+    left = [e for e in manifest["entries"] if e["state"] in OPEN_STATES]
+    total = manifest.get("upload_total") or len(left) + len(done)
+    price = manifest.get("pricing") or {"usd_per_million": USD_PER_MILLION, "tokens_per_char": TOKENS_PER_CHAR}
+    tokens = sum(e["chars"] for e in done) * price["tokens_per_char"]
+    out = {"done": total - len(left), "total": total, "left": len(left),
+           "approx_spent_usd": round(tokens * price["usd_per_million"] / 1_000_000, 2), "eta_minutes": None}
+    # The pace of this sitting only: an upload resumed next month must not count the month between.
+    started = manifest.get("upload_started_at", "")
+    times = sorted(e["completed_at"] for e in done if started and e.get("completed_at", "") >= started)
+    if times and left:
+        elapsed = (_parse(times[-1]) - _parse(started)).total_seconds()
+        out["eta_minutes"] = max(1, round(elapsed / len(times) * len(left) / 60))
+    return out
+
+
+def _parse(stamp: str) -> datetime:
+    return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
 def _estimate(chars: int, api: str) -> dict:
@@ -840,7 +1003,7 @@ def _wait(target_impl, path: Path, manifest: dict, entry: dict, cap_s: float) ->
     while True:
         res = target_impl.job(entry)
         if res.kind == "completed":
-            _record(path, manifest, entry, state=COMPLETED, reason="")
+            _record(path, manifest, entry, state=COMPLETED, reason="", completed_at=now())
             _remember(manifest["target"], entry)
             return COMPLETED
         if res.kind == "failed":
@@ -860,7 +1023,9 @@ def cmd_upload(args: argparse.Namespace) -> dict:
     target_impl = make_target(manifest["target"])
     if not manifest.get("approved_at"):
         manifest["approved_at"] = now()
-        write_json(path, manifest)
+        manifest["upload_total"] = sum(e["state"] in OPEN_STATES for e in manifest["entries"])
+    manifest["upload_started_at"] = now()
+    write_json(path, manifest)
     job_cap = float(args.job_cap_s)
     for entry in manifest["entries"]:
         busy_in_a_row = 0
@@ -895,7 +1060,9 @@ def cmd_upload(args: argparse.Namespace) -> dict:
                 raise Stop(EXIT_STOPPED, sub.reason)
             else:
                 _record(path, manifest, entry, state=FAILED, reason=sub.reason)
-        say(f"{entry['state']:9} {entry['url']}")
+        p = progress(manifest)
+        eta = f", about {p['eta_minutes']} min left" if p["eta_minutes"] else ""
+        say(f"[{p['done']}/{p['total']}] {entry['state']:9} {entry['url']} (~{p['approx_spent_usd']:.2f} $ so far{eta})")
     return summary(manifest, rdir)
 
 
@@ -1046,6 +1213,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--prefix", default=None, help="only pages whose path starts with this (default: the URL's path)")
     p.add_argument("--max-pages", type=int, default=DEFAULT_MAX_PAGES)
     p.add_argument("--urls-file", default=None, help="exact pages to bring, one URL per line (same site as --url); skips discovery")
+    p.add_argument("--include-legal", action="store_true", help="also bring privacy, terms, cookie and account pages")
+    p.add_argument("--full-page", action="store_true", help="upload whole pages, with menus, headers and footers")
     p.add_argument("--api", default=os.environ.get("MABRAIN_API_URL", DEFAULT_API))
     u = sub.add_parser("upload", help="upload the pages of an approved preview (also resumes)")
     u.add_argument("--run", required=True)
