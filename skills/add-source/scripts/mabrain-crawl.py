@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""mabrain-crawl: bring web pages into a MaBrain brain from your own machine.
+"""mabrain-crawl: bring web pages and files into a MaBrain brain from your own machine.
 
-Installed once as ``~/.mabrain/mabrain-crawl.py`` (Python 3.10+, standard library only).
+Ships with the MaBrain plugin (Python 3.10+, standard library only).
 The page content never goes through a model: the script downloads the literal HTML and
 uploads it, and the server converts it to text without an LLM.
 
@@ -9,6 +9,9 @@ uploads it, and the server converts it to text without an LLM.
     mabrain-crawl.py preview --brain BRAIN --url URL --urls-file pages.txt
     mabrain-crawl.py upload  --run RUN_ID
     mabrain-crawl.py status  --run RUN_ID
+    mabrain-crawl.py login                      # once per machine: sign in in the browser
+    mabrain-crawl.py upload-file PATH --brain BRAIN [--source-url URL] [--title T]
+    mabrain-crawl.py key create --name my-agent [--role read] [--env-file .env] [--brain BRAIN]
 
 ``preview`` finds the pages (sitemap.xml, or links from the start page under the prefix),
 downloads them into ``.mabrain/crawl/<run>/`` and writes the manifest: what would be
@@ -17,7 +20,9 @@ the credit. Nothing is uploaded until ``upload`` is run on that same run, and ``
 sends exactly the files the preview downloaded. ``upload`` can be interrupted and run
 again: it continues where it stopped and never submits a page whose job may still run.
 
-Uploads go to POST {api}/v1/brains/{brain}/sources with the ingest key in MABRAIN_API_KEY.
+Uploads go to POST {api}/v1/brains/{brain}/sources with the session from ``login`` (kept in
+~/.mabrain/credentials.json, mode 0600, refreshed on its own), or with MABRAIN_API_KEY when set.
+``key create`` writes a key for an app straight into its env file: it is never printed.
 
 Exit codes: 0 done; 1 usage; 2 some pages failed; 3 stopped (credit exhausted, or a job
 still running: run ``upload`` again later).
@@ -433,16 +438,24 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def check_api(base: str) -> str:
+    """Credentials and tokens only travel over https (or to this machine)."""
+    if not (base.startswith("https://") or re.match(r"http://(127\.0\.0\.1|localhost)(:\d+)?$", base.rstrip("/"))):
+        raise CrawlError(EXIT_USAGE, "the API must be https:// (or a localhost http://)")
+    return base.rstrip("/")
+
+
 class Http:
-    def __init__(self, base: str, headers: dict[str, str]) -> None:
-        if not (base.startswith("https://") or re.match(r"http://(127\.0\.0\.1|localhost)(:\d+)?$", base.rstrip("/"))):
-            raise CrawlError(EXIT_USAGE, "the API must be https:// (or a localhost http://)")
-        self.base = base.rstrip("/")
+    def __init__(self, base: str, headers: dict[str, str], auth=None) -> None:  # noqa: ANN001
+        self.base = check_api(base)
         self.headers = {"User-Agent": USER_AGENT, **headers}
+        self.auth = auth  # called before each request: a session token may have been refreshed
         self.opener = urllib.request.build_opener(_NoRedirect)
 
     def call(self, method: str, path: str, *, json_body=None, multipart=None, params=None, headers=None):  # noqa: ANN001
         headers = {**self.headers, **(headers or {})}
+        if self.auth is not None:
+            headers["Authorization"] = f"Bearer {self.auth()}"
         body = None
         if params:
             path += "?" + urllib.parse.urlencode(params)
@@ -490,16 +503,180 @@ def _code(data: dict) -> str:
     return _error(data)[0]
 
 
+# ---------------------------------------------------------------------------
+# Signing in (T26): the crawler is its own OAuth client of MaBrain, so the person never copies a key.
+# ``login`` opens the browser (PKCE, loopback redirect, RFC 8252); the session lives in
+# ``~/.mabrain/credentials.json`` (0600) and is refreshed under a file lock, so two runs never
+# reuse one refresh token (the server revokes the whole sign-in when that happens; eng review A3).
+# MABRAIN_API_KEY, when set, still wins: agents and CI keep using keys.
+
+LOGIN_SCOPES = "brain:read brain:ingest"
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+LOGIN_WAIT_S = 300
+REFRESH_MARGIN_S = 60
+
+
+def config_dir() -> Path:
+    return Path(os.environ.get("MABRAIN_CONFIG_DIR") or Path.home() / ".mabrain")
+
+
+def credentials_path() -> Path:
+    return config_dir() / "credentials.json"
+
+
+def _save_credentials(data: dict) -> None:
+    path = credentials_path()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+
+
+def _form_post(url: str, fields: dict) -> tuple[int, dict]:
+    req = urllib.request.Request(url, data=urllib.parse.urlencode(fields).encode(), method="POST",
+                                 headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:  # noqa: S310 -- the --api https URL
+            return resp.status, json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read() or b"{}")
+        except ValueError:
+            return e.code, {}
+
+
+def _store_tokens(api: str, client_id: str, tok: dict) -> dict:
+    data = {"api": api, "client_id": client_id, "access_token": tok["access_token"],
+            "refresh_token": tok.get("refresh_token", ""), "expires_at": time.time() + float(tok.get("expires_in", 3600))}
+    _save_credentials(data)
+    return data
+
+
+def cmd_login(args: argparse.Namespace) -> dict:
+    import base64
+    import threading
+    import webbrowser
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    api = check_api(args.api)
+    got: dict = {}
+
+    class Callback(BaseHTTPRequestHandler):
+        def log_message(self, *a):  # noqa: ANN002
+            pass
+
+        def do_GET(self):  # noqa: N802
+            q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(self.path).query))
+            got.update(q)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            ok = "code" in q
+            self.wfile.write(("<!doctype html><meta charset=utf-8><title>MaBrain</title><body style='font-family:system-ui'>"
+                              + ("<h1>Listo</h1><p>Ya puedes volver a la terminal.</p>" if ok else
+                                 "<h1>No se pudo iniciar sesión</h1><p>Vuelve a la terminal.</p>")).encode())
+
+    server = HTTPServer(("127.0.0.1", 0), Callback)
+    redirect = f"http://127.0.0.1:{server.server_port}/callback"
+    status, client = _form_json(f"{api}/register", {
+        "client_name": "MaBrain crawler", "redirect_uris": [redirect], "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"], "token_endpoint_auth_method": "none", "scope": LOGIN_SCOPES})
+    if status not in (200, 201) or "client_id" not in client:
+        raise CrawlError(EXIT_USAGE, f"MaBrain did not register the crawler (HTTP {status}): {_error(client)[1]}")
+    verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    state = secrets.token_urlsafe(16)
+    url = f"{api}/authorize?" + urllib.parse.urlencode({
+        "response_type": "code", "client_id": client["client_id"], "redirect_uri": redirect, "scope": LOGIN_SCOPES,
+        "state": state, "code_challenge": challenge, "code_challenge_method": "S256", "resource": api})
+    thread = threading.Thread(target=server.handle_request, daemon=True)
+    thread.start()
+    say(f"Opening your browser to sign in to MaBrain. If it does not open, visit:\n{url}")
+    if not args.no_browser:
+        webbrowser.open(url)
+    thread.join(LOGIN_WAIT_S)
+    server.server_close()
+    if got.get("state") != state or "code" not in got:
+        raise CrawlError(EXIT_USAGE, "sign-in not completed: " + (got.get("error_description") or got.get("error") or "no answer in 5 minutes"))
+    status, tok = _form_post(f"{api}/token", {"grant_type": "authorization_code", "code": got["code"], "redirect_uri": redirect,
+                                              "client_id": client["client_id"], "code_verifier": verifier, "resource": api})
+    if status != 200 or "access_token" not in tok:
+        raise CrawlError(EXIT_USAGE, f"MaBrain did not issue a session (HTTP {status}): {tok.get('error_description', '')}")
+    _store_tokens(api, client["client_id"], tok)
+    return {"signed_in": True, "api": api, "credentials": str(credentials_path())}
+
+
+def _form_json(url: str, body: dict) -> tuple[int, dict]:
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:  # noqa: S310
+            return resp.status, json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read() or b"{}")
+        except ValueError:
+            return e.code, {}
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+        raise CrawlError(EXIT_USAGE, f"cannot reach {url}: {getattr(e, 'reason', e)}") from e
+
+
+def bearer(api: str) -> str:
+    """What to send as ``Authorization: Bearer``: MABRAIN_API_KEY if set, else the signed-in
+    session, refreshed when it is about to expire (one process at a time, A3)."""
+    import fcntl
+
+    key = os.environ.get("MABRAIN_API_KEY", "")
+    if key:
+        return key
+    path = credentials_path()
+    if not path.is_file():
+        raise CrawlError(EXIT_USAGE, "not signed in: run `mabrain-crawl.py login` (or set MABRAIN_API_KEY)")
+    creds = read_json(path)
+    if creds.get("api", "").rstrip("/") != api.rstrip("/"):
+        raise CrawlError(EXIT_USAGE, f"signed in to {creds.get('api')}, not {api}: run login again")
+    if creds["expires_at"] - REFRESH_MARGIN_S > time.time():
+        return creds["access_token"]
+    lock = path.with_name("credentials.lock")
+    with open(lock, "a") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            creds = read_json(path)  # another run may have refreshed while we waited
+            if creds["expires_at"] - REFRESH_MARGIN_S > time.time():
+                return creds["access_token"]
+            try:
+                status, tok = _form_post(f"{check_api(api)}/token", {"grant_type": "refresh_token", "refresh_token": creds["refresh_token"],
+                                                                     "client_id": creds["client_id"], "resource": api.rstrip("/")})
+            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError, ValueError):
+                status, tok = 0, {}
+            if status != 200 or "access_token" not in tok:
+                # The server may have rotated the token and the answer got lost: reusing the old one
+                # would make it revoke the whole sign-in. Forget it and sign in again (fail closed).
+                path.unlink(missing_ok=True)
+                raise CrawlError(EXIT_USAGE, "your MaBrain sign-in could not be renewed: run `mabrain-crawl.py login` again")
+            return _store_tokens(creds["api"], creds["client_id"], tok)["access_token"]
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
+
+def cmd_logout(args: argparse.Namespace) -> dict:
+    path = credentials_path()
+    existed = path.is_file()
+    path.unlink(missing_ok=True)
+    return {"signed_out": existed}
+
+
 class MaBrainTarget:
     """POST /v1/brains/{brain}/sources. The server decides a 409: ``duplicate`` (this brain
     already has the facts) or ``duplicate_other_brain`` (the operator re-extracts)."""
 
     def __init__(self, target: dict) -> None:
-        key = os.environ.get("MABRAIN_API_KEY", "")
-        if not key:
-            raise CrawlError(EXIT_USAGE, "MABRAIN_API_KEY is not set in this shell")
+        bearer(target["endpoint"])  # fail early, before any upload, when there is no key nor session
         self.brain = target["brain"]
-        self.http = Http(target["endpoint"], {"Authorization": f"Bearer {key}"})
+        endpoint = target["endpoint"]
+        self.http = Http(endpoint, {}, auth=lambda: bearer(endpoint))
 
     def submit(self, entry: dict, data: bytes) -> Submitted:
         # The entry's Idempotency-Key is saved in the manifest before the first attempt, so a
@@ -727,6 +904,138 @@ def cmd_status(args: argparse.Namespace) -> dict:
     return summary(manifest, path.parent)
 
 
+def cmd_upload_file(args: argparse.Namespace) -> dict:
+    """One local file (md, txt, html, pdf, docx; up to 50 MB) into a brain, with the signed-in session."""
+    path = Path(args.path).expanduser()
+    if not path.is_file():
+        raise CrawlError(EXIT_USAGE, f"{path}: no such file")
+    if path.stat().st_size > MAX_UPLOAD_BYTES:
+        raise CrawlError(EXIT_USAGE, f"{path} is larger than 50 MB; split it or upload a smaller export")
+    with open(path, "rb") as fh:
+        data = fh.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise CrawlError(EXIT_USAGE, f"{path} is larger than 50 MB; split it or upload a smaller export")
+    api = args.api.rstrip("/")
+    http_ = Http(api, {}, auth=lambda: bearer(api))
+    ctype = {".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain", ".html": "text/html",
+             ".htm": "text/html", ".pdf": "application/pdf",
+             ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}.get(path.suffix.lower(),
+                                                                                                    "application/octet-stream")
+    fields = {k: v for k, v in (("source_url", args.source_url), ("title", args.title)) if v}
+    status, body, _ = http_.call("POST", f"/v1/brains/{urllib.parse.quote(args.brain)}/sources", multipart=(fields, (path.name, ctype, data)),
+                                 headers={"Idempotency-Key": f"file-{sha256(data)[:32]}-{args.brain}"})
+    code, hint = _error(body)
+    if status not in (201, 202):
+        raise CrawlError(EXIT_FAILED, f"{status} {code}: {hint}".strip())
+    return body
+
+
+def git_guard(env_file: Path) -> str:
+    """Whether a secret may be written to ``env_file`` without ending up in a commit: asks Git for
+    the effective state (tracked, ignored), and refuses when it cannot tell (fail closed)."""
+    import shutil
+    import subprocess
+
+    folder = env_file.parent.resolve()
+    in_repo = any((d / ".git").exists() for d in (folder, *folder.parents))
+    if not in_repo:
+        return "not_a_git_repository"
+    if shutil.which("git") is None:
+        raise CrawlError(EXIT_USAGE, f"{env_file} is in a Git repository and git is not available to check it is ignored")
+
+    def git(*a: str) -> int:
+        return subprocess.run(["git", "-C", str(folder), *a], capture_output=True).returncode
+
+    if git("ls-files", "--error-unmatch", "--", env_file.name) == 0:
+        raise CrawlError(EXIT_USAGE, f"{env_file} is tracked by Git: a key written there would be committed. "
+                                     "Untrack it (git rm --cached) and ignore it, or use another --env-file.")
+    rc = git("check-ignore", "-q", "--", env_file.name)
+    if rc == 1:
+        raise CrawlError(EXIT_USAGE, f"{env_file} is not ignored by Git: add it to .gitignore first.")
+    if rc != 0:
+        raise CrawlError(EXIT_USAGE, f"could not check with Git that {env_file} is ignored")
+    return "ignored"
+
+
+def cmd_key_create(args: argparse.Namespace) -> dict:
+    """A key for the person's own app, written straight into its env file: it never reaches the
+    screen nor the conversation. Only a signed-in person can create keys (eng review A4/O2).
+
+    The operation key is saved before the request and reused on a retry, so a lost answer never
+    leaves a second live key behind: a replayed answer has no key (it is shown once), so that
+    credential is revoked and a new one created."""
+    api = check_api(args.api)
+    env_file = Path(args.env_file).expanduser()
+    git_state = git_guard(env_file)  # before anything exists on the server
+    http_ = Http(api, {}, auth=lambda: bearer(api))
+    pending = config_dir() / "pending-keys" / f"{sha256(f'{api}|{env_file.resolve()}|{args.name}')[:24]}.json"
+    pending.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    import fcntl
+
+    # One process at a time per (API, env file, name), from choosing the operation key to writing the
+    # env file: two concurrent runs can never end with two live keys.
+    with open(pending.with_suffix(".lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            issued = pending.with_suffix(".issued.json")  # the live key this command made for this app
+            current = env_file.read_text(encoding="utf-8").splitlines() if env_file.is_file() else []
+            has_key = any(ln.startswith(f"{args.var}=") for ln in current)
+            if not pending.is_file():
+                if issued.is_file():
+                    # A live key exists for this app, whatever the env file says now (it may have been
+                    # deleted or edited): never make a second one silently.
+                    if not args.replace:
+                        raise CrawlError(EXIT_USAGE, f"a key for {args.name!r} already exists "
+                                                     f"({read_json(issued)['credential_id']}); pass --replace to revoke it and "
+                                                     "write a new one")
+                    old = read_json(issued)["credential_id"]
+                    status, rbody, _ = http_.call("DELETE", f"/v1/keys/{urllib.parse.quote(old)}")
+                    if status not in (200, 404):
+                        code, _hint = _error(rbody)
+                        raise CrawlError(EXIT_FAILED, f"could not revoke the previous key ({status} {code}); nothing was changed")
+                    issued.unlink()
+                elif has_key:
+                    # A key this command did not make: it cannot be revoked from here (fail closed).
+                    raise CrawlError(EXIT_USAGE, f"{env_file} already has {args.var} from elsewhere; remove that line (and revoke "
+                                                 "the key if it is a MaBrain key) before creating a new one")
+            op = read_json(pending)["op"] if pending.is_file() else f"key-{secrets.token_hex(12)}"
+            write_json(pending, {"op": op, "name": args.name, "env_file": str(env_file)})
+
+            def create(op_key: str) -> dict:
+                status, body, _ = http_.call("POST", "/v1/keys", json_body={"role": args.role, "name": args.name},
+                                             headers={"Idempotency-Key": op_key})
+                if status != 201:
+                    code, hint = _error(body)
+                    raise CrawlError(EXIT_FAILED, f"{status} {code}: {hint}".strip())
+                return body
+
+            body = create(op)
+            if not body.get("key"):  # replay of an earlier attempt whose answer was lost: that key is unknown
+                status, rbody, _ = http_.call("DELETE", f"/v1/keys/{urllib.parse.quote(body['credential_id'])}")
+                if status not in (200, 404):  # 404: already inactive
+                    code, hint = _error(rbody)
+                    raise CrawlError(EXIT_FAILED, f"could not revoke the key whose answer was lost ({status} {code}); "
+                                                  "run the same command again")
+                op = f"key-{secrets.token_hex(12)}"
+                write_json(pending, {"op": op, "name": args.name, "env_file": str(env_file)})
+                body = create(op)
+            lines = env_file.read_text(encoding="utf-8").splitlines() if env_file.is_file() else []
+            lines = [ln for ln in lines if not ln.startswith(f"{args.var}=")] + [f"{args.var}={body['key']}"]
+            if args.brain:
+                lines = [ln for ln in lines if not ln.startswith("MABRAIN_BRAIN=")] + [f"MABRAIN_BRAIN={args.brain}"]
+            tmp = env_file.with_name(f".{env_file.name}.{secrets.token_hex(4)}.tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write("\n".join(lines) + "\n")
+            os.replace(tmp, env_file)
+            write_json(issued, {"credential_id": body["credential_id"], "env_file": str(env_file), "var": args.var})
+            pending.unlink(missing_ok=True)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+    return {"credential_id": body["credential_id"], "role": body["role"], "name": body["name"], "written_to": str(env_file),
+            "variable": args.var, "key_prefix": body["key"][:8] + "…", "git": git_state}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="mabrain-crawl", description=__doc__.split("\n\n")[0])
     ap.add_argument("--version", action="version", version=VERSION)
@@ -743,15 +1052,35 @@ def main(argv: list[str] | None = None) -> int:
     u.add_argument("--job-cap-s", default=JOB_CAP_S)
     s = sub.add_parser("status", help="summary of a run")
     s.add_argument("--run", required=True)
+    api_default = os.environ.get("MABRAIN_API_URL", DEFAULT_API)
+    lg = sub.add_parser("login", help="sign in to MaBrain in the browser (once per machine)")
+    lg.add_argument("--api", default=api_default)
+    lg.add_argument("--no-browser", action="store_true", help="only print the URL to open")
+    sub.add_parser("logout", help="forget this machine's MaBrain session")
+    f = sub.add_parser("upload-file", help="upload one local file to a brain")
+    f.add_argument("path"); f.add_argument("--brain", required=True); f.add_argument("--api", default=api_default)
+    f.add_argument("--source-url", default=""); f.add_argument("--title", default="")
+    k = sub.add_parser("key", help="keys for your own apps")
+    ksub = k.add_subparsers(dest="key_cmd", required=True)
+    kc = ksub.add_parser("create", help="create a key for an app and write it to its env file (never printed)")
+    kc.add_argument("--name", required=True, help="the app or agent the key is for")
+    kc.add_argument("--role", choices=["read", "ingest"], default="read")
+    kc.add_argument("--env-file", default=".env"); kc.add_argument("--var", default="MABRAIN_API_KEY")
+    kc.add_argument("--brain", default=None, help="also write MABRAIN_BRAIN=<slug>")
+    kc.add_argument("--replace", action="store_true", help="revoke the key this command wrote there before and write a new one")
+    kc.add_argument("--api", default=api_default)
     args = ap.parse_args(argv)
+    if args.cmd == "key":
+        args.cmd = f"key-{args.key_cmd}"
     try:
-        result = {"preview": cmd_preview, "upload": cmd_upload, "status": cmd_status}[args.cmd](args)
+        result = {"preview": cmd_preview, "upload": cmd_upload, "status": cmd_status, "login": cmd_login, "logout": cmd_logout,
+                  "upload-file": cmd_upload_file, "key-create": cmd_key_create}[args.cmd](args)
     except CrawlError as e:
         say(f"error: {e}")
         print(json.dumps({"error": str(e), "exit": e.code}))
         return e.code
     print(json.dumps(result, indent=2, ensure_ascii=False))
-    if args.cmd == "upload" and result["failed"]:
+    if args.cmd == "upload" and result.get("failed"):
         return EXIT_FAILED
     return EXIT_OK
 

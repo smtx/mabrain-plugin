@@ -21,28 +21,32 @@ Pick the path by what the user gave (`$ARGUMENTS`, or ask):
 
 If the user has more than one brain, call `list_brains` first and pass `brain` (the slug) everywhere.
 
-## Before A or C: the ingest key
+## Before A or C: sign in once on this machine
 
-Uploads from the shell use an ingest key (`mb_in_…`) in the environment variable `MABRAIN_API_KEY`.
-Check it without printing it:
+Uploads from the shell use the crawler that ships with this plugin, signed in to MaBrain once per
+machine (no key to copy). Check `python3 --version` first (3.10+), then check the session:
 
 ```bash
-[ -n "$MABRAIN_API_KEY" ] && echo "key: set (${MABRAIN_API_KEY:0:6}…)" || echo "key: missing"
+test -f ~/.mabrain/credentials.json && echo "signed in" || echo "not signed in"
 ```
 
-- Never print, echo or write the full key, and never ask the user to paste it into the chat.
-- Missing: tell the user to ask their MaBrain operator for an ingest key, add
-  `export MABRAIN_API_KEY=mb_in_…` to their shell profile (`~/.zshrc`) and restart Claude Code (an
-  `export` in another terminal does not reach a session that is already open). Until then, a file
-  under 100 KB can still go through `add_source` with `content` (read it and pass the text).
+- Not signed in: run `python3 "${CLAUDE_SKILL_DIR}/scripts/mabrain-crawl.py" login`. It opens the
+  browser; the person signs in with GitHub and allows access. Tell them that is all it asks.
+- An agent or CI without a browser uses a key in `MABRAIN_API_KEY` instead (the crawler uses it when
+  set). Never print, echo or write a key, and never ask anyone to paste one into the chat.
 - No Bash here (Claude Desktop, claude.ai): only B and `content` are available; say so if the user
-  asked for a crawl.
+  asked for a crawl or a file upload.
 
 ## A. Upload a file
 
-Call `add_source` with `path` (absolute) and, if the file came from the web, `source_url`. It returns
-a `curl` command with every value already quoted: run it as given with Bash, without editing it.
-The answer has `job_id`; follow it with `get_job` (step D).
+```bash
+python3 "${CLAUDE_SKILL_DIR}/scripts/mabrain-crawl.py" upload-file '<absolute path>' --brain <slug> [--source-url '<url>'] [--title '<title>']
+```
+
+Quote the path with single quotes (if it contains one, ask the user to rename the file or copy it).
+The answer has `job_id`; follow it with `get_job` (step D). `add_source` with `path` returns the same
+command with every value already quoted, if you prefer to take it from there (replace
+`mabrain-crawl.py` with the path above).
 
 ## B. One page
 
