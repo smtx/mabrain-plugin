@@ -50,7 +50,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 USER_AGENT = f"mabrain-crawl/{VERSION}"
 HTTP_TIMEOUT_S = 60
 MAX_PAGE_BYTES = 10 * 1024 * 1024
@@ -61,8 +61,9 @@ BUSY_WAIT_CAP_S = 600
 MAX_BUSY_IN_A_ROW = 30  # then stop and let the next upload continue
 # The preview's cost estimate uses the server's prices (GET /v1/pricing, public); these defaults only
 # apply when the server cannot be reached, and the preview then says so. The server has the final word.
-TOKENS_PER_CHAR = 2.2
-USD_PER_MILLION = 2.0
+TOKENS_PER_CHAR = 1.35
+TOKENS_PER_DOCUMENT = 9_500
+USD_PER_MILLION = 1.0
 
 
 def server_pricing(api: str) -> dict:
@@ -72,9 +73,11 @@ def server_pricing(api: str) -> dict:
         with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310 -- https API from --api
             body = json.loads(resp.read())
         return {"usd_per_million": float(body["usd_per_million"]), "tokens_per_char": float(body["tokens_per_char"]),
+                "tokens_per_document": float(body.get("tokens_per_document", 0)),  # a server before 0.3.1 had no fixed part
                 "source": "server"}
     except (OSError, ValueError, KeyError, TypeError):
-        return {"usd_per_million": USD_PER_MILLION, "tokens_per_char": TOKENS_PER_CHAR, "source": "default"}
+        return {"usd_per_million": USD_PER_MILLION, "tokens_per_char": TOKENS_PER_CHAR, "tokens_per_document": TOKENS_PER_DOCUMENT,
+                "source": "default"}
 DEFAULT_API = "https://api.mabra.in"
 
 EXIT_OK, EXIT_USAGE, EXIT_FAILED, EXIT_STOPPED = 0, 1, 2, 3
@@ -949,7 +952,7 @@ def summary(manifest: dict, rdir: Path) -> dict:
         "unchanged": [e["url"] for e in entries if e["state"] == UNCHANGED],
         "failed": [{"url": e["url"], "reason": e["reason"]} for e in entries if e["state"] in (FAILED, OPERATOR)],
         "skipped": manifest.get("skipped", []),
-        "estimate": _estimate(chars, manifest["target"].get("endpoint", "")),
+        "estimate": _estimate(chars, manifest["target"].get("endpoint", ""), documents=len(to_upload)),
         "progress": progress(manifest),
     }
 
@@ -963,7 +966,9 @@ def progress(manifest: dict) -> dict:
     left = [e for e in manifest["entries"] if e["state"] in OPEN_STATES]
     total = manifest.get("upload_total") or len(left) + len(done)
     price = manifest.get("pricing") or {"usd_per_million": USD_PER_MILLION, "tokens_per_char": TOKENS_PER_CHAR}
-    tokens = sum(e["chars"] for e in done) * price["tokens_per_char"]
+    # A manifest saved by crawler 0.2.0 has no fixed part: keep its own rate, never mix in the new one.
+    tokens = (sum(e["chars"] for e in done) * price["tokens_per_char"]
+              + len(done) * price.get("tokens_per_document", 0))
     out = {"done": total - len(left), "total": total, "left": len(left),
            "approx_spent_usd": round(tokens * price["usd_per_million"] / 1_000_000, 2), "eta_minutes": None}
     # The pace of this sitting only: an upload resumed next month must not count the month between.
@@ -979,9 +984,11 @@ def _parse(stamp: str) -> datetime:
     return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
-def _estimate(chars: int, api: str) -> dict:
-    price = server_pricing(api) if api else {"usd_per_million": USD_PER_MILLION, "tokens_per_char": TOKENS_PER_CHAR, "source": "default"}
-    tokens = int(chars * price["tokens_per_char"])
+def _estimate(chars: int, api: str, documents: int = 0) -> dict:
+    """Each page is one document: a per-character part plus a fixed part per document."""
+    price = server_pricing(api) if api else {"usd_per_million": USD_PER_MILLION, "tokens_per_char": TOKENS_PER_CHAR,
+                                             "tokens_per_document": TOKENS_PER_DOCUMENT, "source": "default"}
+    tokens = int(chars * price["tokens_per_char"] + documents * price.get("tokens_per_document", 0))
     return {"visible_chars": chars, "approx_tokens": tokens,
             "approx_cost_usd": round(tokens * price["usd_per_million"] / 1_000_000, 2), "rate_source": price["source"]}
 
