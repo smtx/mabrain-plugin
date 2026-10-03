@@ -1,7 +1,7 @@
 {
   "name": "mabrain",
   "displayName": "MaBrain",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Give your app a brain from Claude Code: add your docs, pages or a whole site, ask it with cited answers, fix what it gets wrong, and plug it into your own agent in minutes.",
   "author": {
     "name": "MaBrain",
