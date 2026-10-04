@@ -1176,7 +1176,9 @@ def cmd_key_create(args: argparse.Namespace) -> dict:
             write_json(pending, {"op": op, "name": args.name, "env_file": str(env_file)})
 
             def create(op_key: str) -> dict:
-                status, body, _ = http_.call("POST", "/v1/keys", json_body={"role": args.role, "name": args.name},
+                # --brain: a key that opens that brain only (also one shared with you, on its owner's credit)
+                status, body, _ = http_.call("POST", "/v1/keys", json_body={"role": args.role, "name": args.name,
+                                                                          **({"brain": args.brain} if args.brain else {})},
                                              headers={"Idempotency-Key": op_key})
                 if status != 201:
                     code, hint = _error(body)

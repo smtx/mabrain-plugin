@@ -34,7 +34,8 @@ Read `${CLAUDE_SKILL_DIR}/reference/api.md` first: it is the contract. Answer in
   python3 "${CLAUDE_SKILL_DIR}/../add-source/scripts/mabrain-crawl.py" key create --name '<app name>' --role read --env-file .env --brain <slug>
   ```
 
-  `--role ingest` only if the agent must add knowledge or sources. If a key already exists for that app
+  `--brain <slug>` makes the key open that brain only (always pass it; for a brain someone shared with the
+  person it is required, and the agent then uses the owner's credit). `--role ingest` only if the agent must add knowledge or sources. If a key already exists for that app
   name, the command refuses: `--replace` revokes it and writes a new one (a key in the env file that
   this command did not make must be removed by hand first). In a Git repository it
   refuses to write to an env file that is tracked or not ignored, before creating anything: add it to
