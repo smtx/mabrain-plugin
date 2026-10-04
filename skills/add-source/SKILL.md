@@ -14,7 +14,8 @@ Pick the path by what the user gave (`$ARGUMENTS`, or ask):
 
 | Input | Path |
 |---|---|
-| A local file (md, txt, html, pdf, docx; up to 50 MB) | A. Upload the file |
+| A local text file (md, txt, html; up to 50 MB) | A. Upload the file |
+| A PDF, a Word file or a book | E. A document: you read it and send its text |
 | One web page | B. One page |
 | A site, a section (`/guides/`), a sitemap, or "re-crawl" | C. Crawl |
 | Pasted text, or a short note from the user | Use the MaBrain `add_source` tool with `content`, `title` and, if there is one, `source_url` |
@@ -47,6 +48,19 @@ Quote the path with single quotes (if it contains one, ask the user to rename th
 The answer has `job_id`; follow it with `get_job` (step D). `add_source` with `path` returns the same
 command with every value already quoted, if you prefer to take it from there (replace
 `mabrain-crawl.py` with the path above).
+
+## E. A document (PDF, Word, a book)
+
+MaBrain takes text only: it never opens a PDF or a Word file, and neither does its engine. You read
+the file (the Read tool reads PDFs; for Word, `textutil -convert txt` on macOS or `pandoc` if
+installed) and send its text as a document dossier:
+
+1. `dossier_start` with `document` (its name, e.g. "Measure What Matters (John Doerr)").
+2. `dossier_add_sections`, a few sections per call, in order: one per chapter or part, `{title,
+   lines}` with no url. The title names the document and the part («Measure What Matters (John
+   Doerr), cap. 3»); the lines are its paragraphs copied literally, never summarised. Each section
+   under 20 KB: split a long chapter («cap. 3 (1/2)»). Skip covers, indexes and blank pages.
+3. `dossier_show`, then `dossier_send` as it says (it asks the person before spending).
 
 ## B. One page
 

@@ -1079,10 +1079,15 @@ def cmd_status(args: argparse.Namespace) -> dict:
 
 
 def cmd_upload_file(args: argparse.Namespace) -> dict:
-    """One local file (md, txt, html, pdf, docx; up to 50 MB) into a brain, with the signed-in session."""
+    """One local text file (Markdown, text or HTML; up to 50 MB) into a brain, with the signed-in session.
+    A PDF or Word file is never sent: MaBrain takes text only, so the AI running this reads the file
+    itself and sends its text as a document dossier (MCP ``dossier_start`` with ``document``)."""
     path = Path(args.path).expanduser()
     if not path.is_file():
         raise CrawlError(EXIT_USAGE, f"{path}: no such file")
+    if path.suffix.lower() in (".pdf", ".docx", ".doc", ".odt", ".rtf", ".pptx", ".xlsx"):
+        raise CrawlError(EXIT_USAGE, f"{path.name}: MaBrain takes text only. Read the file yourself and send its text as a "
+                                     "document dossier (dossier_start with `document`), one section per chapter.")
     if path.stat().st_size > MAX_UPLOAD_BYTES:
         raise CrawlError(EXIT_USAGE, f"{path} is larger than 50 MB; split it or upload a smaller export")
     with open(path, "rb") as fh:
@@ -1092,9 +1097,7 @@ def cmd_upload_file(args: argparse.Namespace) -> dict:
     api = args.api.rstrip("/")
     http_ = Http(api, {}, auth=lambda: bearer(api))
     ctype = {".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain", ".html": "text/html",
-             ".htm": "text/html", ".pdf": "application/pdf",
-             ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}.get(path.suffix.lower(),
-                                                                                                    "application/octet-stream")
+             ".htm": "text/html"}.get(path.suffix.lower(), "text/plain")
     fields = {k: v for k, v in (("source_url", args.source_url), ("title", args.title)) if v}
     status, body, _ = http_.call("POST", f"/v1/brains/{urllib.parse.quote(args.brain)}/sources", multipart=(fields, (path.name, ctype, data)),
                                  headers={"Idempotency-Key": f"file-{sha256(data)[:32]}-{args.brain}"})
