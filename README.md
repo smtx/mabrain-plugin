@@ -15,7 +15,7 @@ claude plugin marketplace add smtx/mabrain-plugin
 claude plugin install mabrain@mabrain
 ```
 
-Restart Claude Code, run `/mcp`, choose the `mabrain` server and sign in with GitHub. Then just ask
+Restart Claude Code, run `/mcp`, choose the `mabrain` server and sign in (Google, GitHub or your email). Then just ask
 Claude, for example: "add https://example.com/docs/ to my brain" or "what does my brain say about
 refunds?".
 
@@ -38,7 +38,7 @@ so instead of guessing, and remembers the question so you can fill the gap.
 ## Uploading files and crawling sites
 
 The first time you upload a file or crawl a site, Claude runs the bundled crawler's `login`: your
-browser opens, you sign in with GitHub, and that machine stays signed in. No key to copy. The crawler
+browser opens, you sign in (Google, GitHub or your email), and that machine stays signed in. No key to copy. The crawler
 (`python3`, no dependencies) sends the pages' literal HTML; nothing goes through a model on the way.
 If Claude Code runs sandboxed, allow the site's domain and `api.mabra.in`.
 
